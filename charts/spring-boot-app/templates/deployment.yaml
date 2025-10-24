@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "spring-boot-app.fullname" . }}
+  labels:
+    {{- include "spring-boot-app.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "spring-boot-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "spring-boot-app.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "spring-boot-app.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: {{ .Chart.Name }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.service.targetPort }}
+          protocol: TCP
+        {{- if and .Values.springBoot.management.enabled (ne .Values.springBoot.management.port .Values.service.targetPort) }}
+        - name: management
+          containerPort: {{ .Values.springBoot.management.port }}
+          protocol: TCP
+        {{- end }}
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: {{ .Values.springBoot.profiles.active | quote }}
+        {{- if .Values.springBoot.management.enabled }}
+        - name: MANAGEMENT_SERVER_PORT
+          value: {{ .Values.springBoot.management.port | quote }}
+        {{- end }}
+        {{- if .Values.springBoot.jvm.fullOpts }}
+        - name: JAVA_OPTS
+          value: {{ .Values.springBoot.jvm.fullOpts | quote }}
+        {{- else if .Values.springBoot.jvm.additionalOpts }}
+        - name: ADDITIONAL_JAVA_OPTS
+          value: {{ .Values.springBoot.jvm.additionalOpts | quote }}
+        {{- end }}
+        {{- with .Values.env }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.envFrom }}
+        envFrom:
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if .Values.springBoot.livenessProbe.enabled }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.springBoot.livenessProbe.path }}
+            port: {{ .Values.springBoot.management.enabled | ternary .Values.springBoot.management.port .Values.service.targetPort }}
+          initialDelaySeconds: {{ .Values.springBoot.livenessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.springBoot.livenessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.springBoot.livenessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.springBoot.livenessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.springBoot.readinessProbe.enabled }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.springBoot.readinessProbe.path }}
+            port: {{ .Values.springBoot.management.enabled | ternary .Values.springBoot.management.port .Values.service.targetPort }}
+          initialDelaySeconds: {{ .Values.springBoot.readinessProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.springBoot.readinessProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.springBoot.readinessProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.springBoot.readinessProbe.failureThreshold }}
+        {{- end }}
+        {{- if .Values.springBoot.startupProbe.enabled }}
+        startupProbe:
+          httpGet:
+            path: {{ .Values.springBoot.startupProbe.path }}
+            port: {{ .Values.springBoot.management.enabled | ternary .Values.springBoot.management.port .Values.service.targetPort }}
+          initialDelaySeconds: {{ .Values.springBoot.startupProbe.initialDelaySeconds }}
+          periodSeconds: {{ .Values.springBoot.startupProbe.periodSeconds }}
+          timeoutSeconds: {{ .Values.springBoot.startupProbe.timeoutSeconds }}
+          failureThreshold: {{ .Values.springBoot.startupProbe.failureThreshold }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.resources | nindent 12 }}
+        {{- with .Values.volumeMounts }}
+        volumeMounts:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        {{- if .Values.securityContext.readOnlyRootFilesystem }}
+        {{- if not .Values.volumeMounts }}
+        volumeMounts:
+        {{- end }}
+        - name: tmp
+          mountPath: /tmp
+        {{- end }}
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.securityContext.readOnlyRootFilesystem }}
+      {{- if not .Values.volumes }}
+      volumes:
+      {{- end }}
+      - name: tmp
+        emptyDir: {}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

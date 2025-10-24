@@ -1,0 +1,207 @@
+# Default values for spring-boot-app
+replicaCount: 1
+
+image:
+  repository: your-registry/your-app
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+
+# Naming overrides for Kubernetes resources
+# nameOverride: Overrides the chart name portion of resource names
+# - Default naming: <release-name>-<chart-name>
+# - With nameOverride: <release-name>-<nameOverride>
+# - Example: If release is "my-app" and nameOverride is "backend", resources will be named "my-app-backend-*"
+nameOverride: ""
+
+# fullnameOverride: Completely overrides the full name of resources
+# - Replaces the entire generated name with this value
+# - Example: If fullnameOverride is "custom-service", all resources will be named "custom-service-*"
+# - Takes precedence over nameOverride when both are set
+fullnameOverride: ""
+
+serviceAccount:
+  create: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 3000
+  fsGroup: 3000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: app.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: app-tls
+  #    hosts:
+  #      - app.example.com
+
+# Traefik IngressRoute configuration
+traefikIngressRoute:
+  enabled: false
+  matchHost: "" # If set, will override the Host() in the route match
+  entryPoints:
+    - web
+    - websecure
+  routes:
+    - match: Host(`app.example.com`)
+      kind: Rule
+      middlewares: []
+        # - name: mw-internal-ipwhitelist
+        #   namespace: traefik
+        # - name: mw-redirect-to-https
+        #   namespace: traefik
+        # - name: mw-default-https-headers-without-content-security-policy
+        #   namespace: traefik
+      services:
+        - name: "" # Will default to the service name if empty
+          port: 80 # Will default to service.port if not specified
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# Spring Boot specific configurations
+springBoot:
+  profiles:
+    active: "prod"
+  
+  # JVM configuration
+  jvm:
+    # Use fullOpts for 3rd party images that don't support ADDITIONAL_JAVA_OPTS
+    # When set, this completely overrides JAVA_OPTS
+    fullOpts: ""
+    
+    # Additional JVM options (for custom images built with our Dockerfile)
+    # These are appended to default container-aware options via ADDITIONAL_JAVA_OPTS
+    # Examples:
+    # - Debug: "-Xdebug -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
+    # - APM: "-javaagent:newrelic.jar"  
+    # - GC tuning: "-XX:G1HeapRegionSize=16m -XX:MaxGCPauseMillis=100"
+    additionalOpts: ""
+  
+  # Management endpoints
+  # Note: If management.port equals service.targetPort, only one port will be exposed
+  # This prevents duplicate port declarations when apps don't separate management endpoints
+  management:
+    enabled: true
+    port: 8081
+    
+  # Liveness probe configuration
+  livenessProbe:
+    enabled: true
+    path: /actuator/health/liveness
+    initialDelaySeconds: 60
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+    
+  # Readiness probe configuration
+  readinessProbe:
+    enabled: true
+    path: /actuator/health/readiness
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  # Startup probe configuration (useful for slow-starting apps)
+  startupProbe:
+    enabled: false
+    path: /actuator/health/liveness
+    initialDelaySeconds: 0
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
+
+# Environment variables
+env: []
+  # - name: JAVA_OPTS
+  #   value: "-Xmx512m -Xms256m"
+  # - name: SPRING_DATASOURCE_URL
+  #   value: "jdbc:postgresql://postgres:5432/mydb"
+  # - name: PG_PASSWORD
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: my-existing-secret  # Name of your existing secret
+  #       key: mypass     
+
+# Environment variables from ConfigMap
+envFrom: []
+  # - configMapRef:
+  #     name: app-config
+  # - secretRef:
+  #     name: app-secrets
+
+# ConfigMap for application.properties or application.yml
+configMap:
+  enabled: false
+  data: {}
+    # application.properties: |
+    #   server.port=8080
+    #   spring.application.name=my-app
+
+# Volumes and volume mounts
+volumes: []
+  # - name: tmp
+  #   emptyDir: {}
+  # - name: config
+  #   configMap:
+  #     name: app-config
+
+volumeMounts: []
+  # - name: tmp
+  #   mountPath: /tmp
+  # - name: config
+  #   mountPath: /config
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1

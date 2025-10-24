@@ -1,0 +1,12 @@
+apiVersion: v2
+name: spring-boot-app
+description: A Helm chart for Spring Boot applications
+type: application
+version: 0.0.1
+appVersion: "0.0.1"
+keywords:
+  - spring-boot
+  - java
+maintainers:
+  - name: Mr Krystof
+    email: erkrystof@users.noreply.github.com

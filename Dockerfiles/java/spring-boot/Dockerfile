@@ -6,7 +6,7 @@
 # Build Args:
 #   BASE_IMAGE - Base Docker image (default: eclipse-temurin:17-jre-alpine)
 #   JAR_FILE - Path to the JAR file to copy (required)
-#   HEAP_SIZE - JVM heap size (default: 512m)
+#   MAX_RAM_PERCENTAGE - Percentage of container memory to use for heap (default: 75.0)
 #   APP_NAME - Application name for logging/monitoring (default: app)
 
 ARG BASE_IMAGE=eclipse-temurin:17-jre-alpine
@@ -18,7 +18,8 @@ LABEL description="Generic Spring Boot application container"
 
 # Build arguments
 ARG JAR_FILE
-ARG HEAP_SIZE=512m
+ARG MAX_RAM_PERCENTAGE=75.0
+ARG ADDITIONAL_JAVA_OPTS=""
 ARG APP_NAME=app
 
 # Create app user for security (don't run as root)
@@ -36,11 +37,13 @@ RUN chown -R appuser:appgroup /app
 # Switch to non-root user
 USER appuser
 
-# Set JVM options
-ENV JAVA_OPTS="-Xms${HEAP_SIZE} -Xmx${HEAP_SIZE} \
-    -XX:+UseContainerSupport \
-    -XX:MaxRAMPercentage=75.0 \
-    -Djava.security.egd=file:/dev/./urandom"
+# Set JVM options - Let Java automatically size heap based on container limits
+ENV JAVA_OPTS="-XX:+UseContainerSupport \
+    -XX:MaxRAMPercentage=${MAX_RAM_PERCENTAGE} \
+    -XX:+UseG1GC \
+    -XX:+UseStringDeduplication \
+    -Djava.security.egd=file:/dev/./urandom \
+    ${ADDITIONAL_JAVA_OPTS}"
 
 # Expose default Spring Boot port
 EXPOSE 8080

@@ -1,0 +1,6 @@
+owner: krystof-io
+git-repo: devops-templates
+charts-dir: charts
+index-path: index.yaml
+packages-with-index: true
+push: true
