@@ -1,0 +1,16 @@
+{{- if and .Values.traefikIngressRoute.enabled .Values.traefikIngressRoute.stripPrefix.enabled -}}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Values.traefikIngressRoute.stripPrefix.middlewareName | default (printf "%s-strip-prefix" (include "spring-boot-app.fullname" .)) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "spring-boot-app.labels" . | nindent 4 }}
+    app.kubernetes.io/component: middleware
+spec:
+  stripPrefix:
+    prefixes:
+      {{- range .Values.traefikIngressRoute.stripPrefix.prefixes }}
+      - {{ . | quote }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,24 @@
+{{- if or .Values.persistence.data.enabled .Values.persistence.logs.enabled (and .Values.persistence.work.enabled (eq .Values.persistence.work.type "persistentVolume")) -}}
+{{- range $name, $config := .Values.persistence }}
+{{- if and $config.enabled (eq $config.existingClaim "") (or (eq $name "data") (eq $name "logs") (and (eq $name "work") (eq $config.type "persistentVolume"))) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "spring-boot-app.fullname" $ }}-{{ $name }}
+  namespace: {{ .Release.Namespace }}  
+  labels:
+    {{- include "spring-boot-app.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: storage-{{ $name }}
+spec:
+  accessModes:
+    - {{ $config.accessMode }}
+  {{- if $config.storageClass }}
+  storageClassName: {{ $config.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $config.size }}
+{{- end }}
+{{- end }}
+{{- end }}

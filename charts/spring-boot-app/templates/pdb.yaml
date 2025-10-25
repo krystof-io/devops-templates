@@ -3,6 +3,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: {{ include "spring-boot-app.fullname" . }}
+  namespace: {{ .Release.Namespace }}  
   labels:
     {{- include "spring-boot-app.labels" . | nindent 4 }}
 spec:

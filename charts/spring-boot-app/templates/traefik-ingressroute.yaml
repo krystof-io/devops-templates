@@ -13,10 +13,15 @@ spec:
     {{- end }}
   routes:
     {{- range .Values.traefikIngressRoute.routes }}
-    - match: {{ if $.Values.traefikIngressRoute.matchHost }}Host(`{{ $.Values.traefikIngressRoute.matchHost }}`){{ else }}{{ .match }}{{ end }}
+    - match: {{ if $.Values.traefikIngressRoute.quickMatch }}{{ $.Values.traefikIngressRoute.quickMatch }}{{ else }}{{ .match }}{{ end }}
       kind: {{ .kind }}
-      {{- if .middlewares }}
+      {{- $hasMiddlewares := or .middlewares $.Values.traefikIngressRoute.stripPrefix.enabled }}
+      {{- if $hasMiddlewares }}
       middlewares:
+        {{- if $.Values.traefikIngressRoute.stripPrefix.enabled }}
+        - name: {{ $.Values.traefikIngressRoute.stripPrefix.middlewareName | default (printf "%s-strip-prefix" (include "spring-boot-app.fullname" $)) }}
+          namespace: {{ $.Release.Namespace }}
+        {{- end }}
         {{- range .middlewares }}
         - name: {{ .name }}
           {{- if .namespace }}

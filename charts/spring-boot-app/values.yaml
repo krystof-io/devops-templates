@@ -17,8 +17,10 @@ nameOverride: ""
 
 # fullnameOverride: Completely overrides the full name of resources
 # - Replaces the entire generated name with this value
-# - Example: If fullnameOverride is "custom-service", all resources will be named "custom-service-*"
+# - Example: If fullnameOverride is "custom-service", all resources will be named "custom-service"
 # - Takes precedence over nameOverride when both are set
+# - NOTE: Labels (app.kubernetes.io/instance) will still use the release name for proper Kubernetes identification
+# - Resource names and label values serve different purposes and don't need to match
 fullnameOverride: ""
 
 serviceAccount:
@@ -67,10 +69,17 @@ ingress:
 # Traefik IngressRoute configuration
 traefikIngressRoute:
   enabled: false
-  matchHost: "" # If set, will override the Host() in the route match
+  quickMatch: "" # If set, will override the route match line
   entryPoints:
     - web
     - websecure
+  # StripPrefix middleware configuration
+  stripPrefix:
+    enabled: false
+    # Prefixes to strip (e.g., ["/api", "/v1"])
+    prefixes: []
+    # Custom middleware name (defaults to "<release>-strip-prefix")
+    middlewareName: ""
   routes:
     - match: Host(`app.example.com`)
       kind: Rule
@@ -83,7 +92,7 @@ traefikIngressRoute:
         #   namespace: traefik
       services:
         - name: "" # Will default to the service name if empty
-          port: 80 # Will default to service.port if not specified
+          port:  # Will default to service.port if not specified
 
 resources:
   limits:
@@ -105,27 +114,39 @@ springBoot:
   profiles:
     active: "prod"
   
-  # JVM configuration
-  jvm:
-    # Use fullOpts for 3rd party images that don't support ADDITIONAL_JAVA_OPTS
-    # When set, this completely overrides JAVA_OPTS
-    fullOpts: ""
-    
-    # Additional JVM options (for custom images built with our Dockerfile)
-    # These are appended to default container-aware options via ADDITIONAL_JAVA_OPTS
-    # Examples:
-    # - Debug: "-Xdebug -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
-    # - APM: "-javaagent:newrelic.jar"  
-    # - GC tuning: "-XX:G1HeapRegionSize=16m -XX:MaxGCPauseMillis=100"
-    additionalOpts: ""
-  
   # Management endpoints
   # Note: If management.port equals service.targetPort, only one port will be exposed
   # This prevents duplicate port declarations when apps don't separate management endpoints
   management:
     enabled: true
     port: 8081
+      
+  # JVM configuration
+  jvm:
+    # Container-aware JVM defaults (set via JAVA_TOOL_OPTIONS)
+    # These provide sensible defaults that work with container resource limits
+    containerDefaults:
+      enabled: true
+      maxRAMPercentage: "75.0"
+      useG1GC: true
+      useStringDeduplication: true
     
+    # Additional JVM options (set via JAVA_TOOL_OPTIONS - works with any Java image)
+    # Examples:
+    # - Debug: "-Xdebug -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
+    # - APM: "-javaagent:newrelic.jar"  
+    # - GC tuning: "-XX:G1HeapRegionSize=16m -XX:MaxGCPauseMillis=100"
+    additionalOpts: ""
+    
+    # Java temporary directory override (optional)
+    # If not set, uses system default (/tmp)
+    # Example: "/app/work" to use application working directory
+    tmpdir: ""
+    
+    # Full JAVA_OPTS override (only use if you need complete control)
+    # When set, this completely overrides the image's default JAVA_OPTS
+    fullOpts: ""
+
   # Liveness probe configuration
   livenessProbe:
     enabled: true
@@ -151,7 +172,41 @@ springBoot:
     initialDelaySeconds: 0
     periodSeconds: 10
     timeoutSeconds: 5
-    failureThreshold: 30
+    failureThreshold: 30    
+
+# OpenTelemetry configuration
+opentelemetry:
+  enabled: false
+  # OpenTelemetry Java agent version to download
+  agentVersion: "1.32.0"
+  # Service name for traces (defaults to chart fullname if empty)
+  serviceName: ""
+  # OTLP endpoint (where to send telemetry data)
+  endpoint: "http://otel-collector:4318/v1/traces"
+  # Init container image for downloading the agent
+  initContainer:
+    image: "curlimages/curl:8.4.0"
+    resources:
+      limits:
+        cpu: 100m
+        memory: 64Mi
+      requests:
+        cpu: 50m
+        memory: 32Mi
+  # OpenTelemetry configuration
+  config:
+    # Resource attributes (key=value,key2=value2)
+    resourceAttributes: ""
+    # Sampling configuration
+    traceSampler: "parentbased_traceidratio"
+    traceSamplerArg: "1.0"
+    # Instrumentation-specific settings
+    instrumentationConfig: {}
+      # Example:
+      # HTTP_ENABLED: "true"
+      # JDBC_ENABLED: "true"
+      # JMS_ENABLED: "false"
+  
 
 # Environment variables
 env: []
@@ -176,23 +231,69 @@ envFrom: []
 configMap:
   enabled: false
   data: {}
-    # application.properties: |
-    #   server.port=8080
-    #   spring.application.name=my-app
+    # application.yml: |
+    #   server:
+    #     port: 8080
+    #   spring:
+    #     application:
+    #       name: my-app
+    #     servlet:
+    #       multipart:
+    #         location: /app/work/uploads
+    #   logging:
+    #     file:
+    #       name: /app/logs/application.log
+    #   app:
+    #     data:
+    #       directory: /app/data
+    #     work:
+    #       directory: /app/work
 
-# Volumes and volume mounts
+# Persistent storage configuration
+persistence:
+  # Application data storage
+  data:
+    enabled: false
+    storageClass: ""  # Use default storage class if empty
+    accessMode: ReadWriteOnce
+    size: 1Gi
+    mountPath: /app/data
+    # Optionally specify existing PVC name
+    existingClaim: ""
+  
+  # Logs storage (usually ephemeral, but can be persistent for debugging)
+  logs:
+    enabled: false
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 500Mi
+    mountPath: /app/logs
+    existingClaim: ""
+  
+  # Application working directory (processing, temp files, etc.)
+  work:
+    enabled: false
+    type: emptyDir  # or "persistentVolume"
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 1Gi
+    mountPath: /app/work
+    existingClaim: ""
+
+# Additional volumes and volume mounts (for advanced use cases)
 volumes: []
-  # - name: tmp
-  #   emptyDir: {}
-  # - name: config
+  # - name: custom-config
   #   configMap:
   #     name: app-config
+  # - name: shared-cache
+  #   persistentVolumeClaim:
+  #     claimName: shared-cache-pvc
 
 volumeMounts: []
-  # - name: tmp
-  #   mountPath: /tmp
-  # - name: config
-  #   mountPath: /config
+  # - name: custom-config
+  #   mountPath: /app/config
+  # - name: shared-cache
+  #   mountPath: /app/cache
 
 nodeSelector: {}
 
