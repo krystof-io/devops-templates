@@ -35,7 +35,7 @@ jobs:
       - name: Build and push Docker image
         run: |
           IMAGE_TAG="${{ steps.tag.outputs.tag }}"
-          IMAGE_NAME="${{ vars.IMAGE_REGISTRY_HOST }}/init-utilities:${IMAGE_TAG}"
+          IMAGE_NAME="${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/init-utilities:${IMAGE_TAG}"
           
           echo "Building image: ${IMAGE_NAME}"
 
