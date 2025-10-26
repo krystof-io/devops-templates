@@ -1,0 +1,9 @@
+# OpenTelemetry Java Agent versions to include
+opentelemetry:
+  # Which version should 'latest' symlink point to
+  default: "2.21.0"
+  
+  # All versions to include in the image
+  versions:
+    - "2.21.0"
+    - "2.20.0"
