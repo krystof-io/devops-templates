@@ -38,9 +38,10 @@ jobs:
           IMAGE_NAME="${{ vars.IMAGE_REGISTRY_HOST }}/init-utilities:${IMAGE_TAG}"
           
           echo "Building image: ${IMAGE_NAME}"
+
+          cd Dockerfiles/init-utilities
           
           docker build \
-            -f Dockerfiles/init-utilities/Dockerfile \
             -t "${IMAGE_NAME}" \
             .
           
