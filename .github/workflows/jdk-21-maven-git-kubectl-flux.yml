@@ -81,9 +81,8 @@ jobs:
     - name: Build and push Docker image
       uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
       with:
-        context: ./jdk-21-maven-git-kubectl-flux
-        file: ./jdk-21-maven-git-kubectl-flux/Dockerfile
-        push: ${{ github.event_name != 'pull_request' }}          
+        context: ./Dockerfiles/init-utilities/jdk-21-maven-git-kubectl-flux
+        push: ${{ github.event_name != 'pull_request' }}
         build-args: |
           RUNNER_VERSION=${{ github.event.inputs.runner_version || env.DEFAULT_RUNNER_VERSION }}
           JDK_VERSION=${{ github.event.inputs.jdk_version || env.DEFAULT_JDK_VERSION }}
