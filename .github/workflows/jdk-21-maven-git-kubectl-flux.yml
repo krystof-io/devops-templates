@@ -1,4 +1,4 @@
-name: JDK21-maven-git-kubectl-flux
+name: Build JDK21-maven-git-kubectl-flux image
 on:
   workflow_dispatch:
     inputs:
