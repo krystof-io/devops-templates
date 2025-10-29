@@ -17,36 +17,4 @@ entries:
     urls:
     - spring-boot-app-0.0.3.tgz
     version: 0.0.3
-  - apiVersion: v2
-    appVersion: 0.0.2
-    created: "2025-10-25T19:21:24.576798439Z"
-    description: A Helm chart for Spring Boot applications
-    digest: ef0892f2f50dab3629fe329e78c3023b5156a923006caabb02a892572490fc12
-    keywords:
-    - spring-boot
-    - java
-    maintainers:
-    - email: erkrystof@users.noreply.github.com
-      name: Mr Krystof
-    name: spring-boot-app
-    type: application
-    urls:
-    - spring-boot-app-0.0.2.tgz
-    version: 0.0.2
-  - apiVersion: v2
-    appVersion: 0.0.1
-    created: "2025-10-24T15:29:57.6573323Z"
-    description: A Helm chart for Spring Boot applications
-    digest: 33f2df7094a2265f4dbb39fee0758a88556017e05f80ee2b8984630c78ada693
-    keywords:
-    - spring-boot
-    - java
-    maintainers:
-    - email: erkrystof@users.noreply.github.com
-      name: Mr Krystof
-    name: spring-boot-app
-    type: application
-    urls:
-    - spring-boot-app-0.0.1.tgz
-    version: 0.0.1
 generated: "2025-10-29T01:50:16.365403688Z"
