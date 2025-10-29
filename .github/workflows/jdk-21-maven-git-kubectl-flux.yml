@@ -1,0 +1,131 @@
+name: JDK21-maven-git-kubectl-flux
+on:
+  workflow_dispatch:
+    inputs:
+      runner_version:
+        description: 'GitHub Actions Runner Base Image Version (e.g.: latest)'
+        required: false
+      jdk_version:
+        description: 'JDK Version Override (e.g.: 21.0.8.0.0+9-0)'
+        required: false
+      maven_version:
+        description: 'Maven Version Override (e.g.: 3.9.11)'
+        required: false
+      yq_version:
+        description: 'yq Version Override (e.g.: 4.48.1)'
+        required: false
+      kubectl_version:
+        description: 'kubectl Version Override (e.g.: 1.34.1)'
+        required: false
+      flux_version:
+        description: 'Flux CLI Version Override (e.g.: 2.7.2)'
+        required: false
+  push:
+    branches:
+      - main
+    paths:
+      - 'jdk-21-maven-git-kubectl-flux/**'
+      - '.github/workflows/jdk-21-maven-git-kubectl-flux.yml'
+  pull_request:
+    paths:
+      - 'jdk-21-maven-git-kubectl-flux/**'
+      - '.github/workflows/jdk-21-maven-git-kubectl-flux.yml'
+  
+jobs:
+  build-and-push:
+    runs-on: arc-runners-basic
+    
+    env:
+      # Default versions - single source of truth
+      DEFAULT_RUNNER_VERSION: 'latest'
+      DEFAULT_JDK_VERSION: '21.0.8.0.0+9-0'
+      DEFAULT_MAVEN_VERSION: '3.9.11'
+      DEFAULT_YQ_VERSION: '4.48.1'
+      DEFAULT_KUBECTL_VERSION: '1.34.1'
+      DEFAULT_FLUX_VERSION: '2.7.2'
+      DOCKER_BUILD_SUMMARY: true # Set to true to enable detailed build summary
+      DOCKER_BUILD_RECORD_UPLOAD: false # Set to true to upload build records as artifacts
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5
+
+    - name: Login to internal private docker repo
+      uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef #v3.6.0
+      with:
+        registry: ${{ vars.IMAGE_REGISTRY_HOST }}
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        
+    - name: Get current date
+      id: date
+      run: echo "date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
+    - name: Show build configuration
+      run: |
+        echo "## 🐳 Docker Image Build Configuration" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Component | Version |" >> $GITHUB_STEP_SUMMARY
+        echo "|-----------|---------|" >> $GITHUB_STEP_SUMMARY
+        echo "| GitHub Actions Runner | \`${{ github.event.inputs.runner_version || env.DEFAULT_RUNNER_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| JDK | \`${{ github.event.inputs.jdk_version || env.DEFAULT_JDK_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Maven | \`${{ github.event.inputs.maven_version || env.DEFAULT_MAVEN_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| yq | \`${{ github.event.inputs.yq_version || env.DEFAULT_YQ_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| kubectl | \`${{ github.event.inputs.kubectl_version || env.DEFAULT_KUBECTL_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| Flux CLI | \`${{ github.event.inputs.flux_version || env.DEFAULT_FLUX_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Build Context:** \`./jdk-21-maven-git-kubectl-flux\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Push:** \`${{ github.event_name != 'pull_request' }}\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
+      with:
+        context: ./jdk-21-maven-git-kubectl-flux
+        file: ./jdk-21-maven-git-kubectl-flux/Dockerfile
+        push: ${{ github.event_name != 'pull_request' }}          
+        build-args: |
+          RUNNER_VERSION=${{ github.event.inputs.runner_version || env.DEFAULT_RUNNER_VERSION }}
+          JDK_VERSION=${{ github.event.inputs.jdk_version || env.DEFAULT_JDK_VERSION }}
+          MAVEN_VERSION=${{ github.event.inputs.maven_version || env.DEFAULT_MAVEN_VERSION }}
+          YQ_VERSION=${{ github.event.inputs.yq_version || env.DEFAULT_YQ_VERSION }}
+          KUBECTL_VERSION=${{ github.event.inputs.kubectl_version || env.DEFAULT_KUBECTL_VERSION }}
+          FLUX_VERSION=${{ github.event.inputs.flux_version || env.DEFAULT_FLUX_VERSION }}
+        labels: |
+          org.opencontainers.image.title=GitHub Actions Runner - JDK21 + Maven + K8s Tools
+          org.opencontainers.image.description=Self-hosted GitHub Actions runner with JDK 21, Maven, kubectl, yq, and Flux CLI
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.created=${{ steps.date.outputs.date }}
+          org.opencontainers.image.version=${{ github.sha }}
+          org.opencontainers.image.vendor=${{ github.repository_owner }}
+          io.krystof.runner.version=${{ github.event.inputs.runner_version || env.DEFAULT_RUNNER_VERSION }}
+          io.krystof.jdk.version=${{ github.event.inputs.jdk_version || env.DEFAULT_JDK_VERSION }}
+          io.krystof.maven.version=${{ github.event.inputs.maven_version || env.DEFAULT_MAVEN_VERSION }}
+          io.krystof.yq.version=${{ github.event.inputs.yq_version || env.DEFAULT_YQ_VERSION }}
+          io.krystof.kubectl.version=${{ github.event.inputs.kubectl_version || env.DEFAULT_KUBECTL_VERSION }}
+          io.krystof.flux.version=${{ github.event.inputs.flux_version || env.DEFAULT_FLUX_VERSION }}
+        tags: |
+          ${{ vars.IMAGE_REGISTRY_HOST }}/${{ github.repository_owner }}/actions-runner-jdk21-maven-git-kubectl-flux:latest
+          ${{ vars.IMAGE_REGISTRY_HOST }}/${{ github.repository_owner }}/actions-runner-jdk21-maven-git-kubectl-flux:${{ github.sha }}
+
+    - name: Build completion summary
+      if: success()
+      run: |
+        cat >> $GITHUB_STEP_SUMMARY << 'EOF'
+        
+        ## ✅ Build Completed Successfully
+        
+        ### 📦 Generated Images:
+        - `${{ vars.IMAGE_REGISTRY_HOST }}/${{ github.repository_owner }}/actions-runner-jdk21-maven-git-kubectl-flux:latest`
+        - `${{ vars.IMAGE_REGISTRY_HOST }}/${{ github.repository_owner }}/actions-runner-jdk21-maven-git-kubectl-flux:${{ github.sha }}`
+        
+        ### 🔍 Version Inspection Commands:
+        ```bash
+        # View all labels
+        docker inspect ${{ vars.IMAGE_REGISTRY_HOST }}/${{ github.repository_owner }}/actions-runner-jdk21-maven-git-kubectl-flux:latest | jq '.[0].Config.Labels'
+        
+        # View just tool versions
+        docker inspect ${{ vars.IMAGE_REGISTRY_HOST }}/${{ github.repository_owner }}/actions-runner-jdk21-maven-git-kubectl-flux:latest | jq -r '.[0].Config.Labels | to_entries[] | select(.key | startswith("io.krystof")) | "\(.key): \(.value)"'
+        ```
+        EOF  
