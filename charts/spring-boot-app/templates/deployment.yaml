@@ -31,15 +31,14 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- if .Values.opentelemetry.enabled }}
       initContainers:
-      - name: download-otel-agent
+      - name: copy-otel-agent
         image: {{ .Values.opentelemetry.initContainer.image }}
         command: ['sh', '-c']
         args:
           - |
-            echo "Downloading OpenTelemetry Java agent v{{ .Values.opentelemetry.agentVersion }}..."
-            curl -L -o /otel/opentelemetry-javaagent.jar \
-              "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v{{ .Values.opentelemetry.agentVersion }}/opentelemetry-javaagent.jar"
-            echo "Download completed successfully"
+            echo "Copying OpenTelemetry Java agent v{{ .Values.opentelemetry.agentVersion }}..."
+            cp /utilities/otel-agents/opentelemetry-javaagent-{{ .Values.opentelemetry.agentVersion }}.jar /otel/opentelemetry-javaagent.jar
+            echo "Copy completed successfully"
         volumeMounts:
         - name: otel-agent
           mountPath: /otel
@@ -100,6 +99,8 @@ spec:
           value: {{ .Values.opentelemetry.serviceName | default (include "spring-boot-app.fullname" .) | quote }}
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: {{ .Values.opentelemetry.endpoint | quote }}
+        - name: OTEL_EXPORTER_OTLP_PROTOCOL
+          value: {{ .Values.opentelemetry.config.otlpProtocol | quote }}
         {{- if .Values.opentelemetry.config.resourceAttributes }}
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: {{ .Values.opentelemetry.config.resourceAttributes | quote }}
@@ -108,6 +109,10 @@ spec:
           value: {{ .Values.opentelemetry.config.traceSampler | quote }}
         - name: OTEL_TRACES_SAMPLER_ARG
           value: {{ .Values.opentelemetry.config.traceSamplerArg | quote }}
+        - name: OTEL_METRICS_EXPORTER
+          value: {{ .Values.opentelemetry.config.metricsExporter | quote }}
+        - name: OTEL_LOGS_EXPORTER
+          value: {{ .Values.opentelemetry.config.logsExporter | quote }}
         {{- range $key, $value := .Values.opentelemetry.config.instrumentationConfig }}
         - name: {{ printf "OTEL_INSTRUMENTATION_%s" ($key | upper) }}
           value: {{ $value | quote }}

@@ -177,15 +177,15 @@ springBoot:
 # OpenTelemetry configuration
 opentelemetry:
   enabled: false
-  # OpenTelemetry Java agent version to download
-  agentVersion: "1.32.0"
+  # OpenTelemetry Java agent version (used to locate the agent jar in init utilities image)
+  agentVersion: "2.21.0"
   # Service name for traces (defaults to chart fullname if empty)
   serviceName: ""
   # OTLP endpoint (where to send telemetry data)
   endpoint: "http://otel-collector:4318/v1/traces"
-  # Init container image for downloading the agent
+  # Init container image for copying the agent from utilities image
   initContainer:
-    image: "curlimages/curl:8.4.0"
+    image: "docker-private.build.krystof.io/krystof-io/init-utilities:latest"
     resources:
       limits:
         cpu: 100m
@@ -197,16 +197,45 @@ opentelemetry:
   config:
     # Resource attributes (key=value,key2=value2)
     resourceAttributes: ""
-    # Sampling configuration
+    # OTLP exporter protocol (grpc, http/protobuf, http/json)
+    otlpProtocol: "grpc"
+    
+    # Trace sampling configuration
+    # traceSampler: Controls which traces are collected
+    # Valid values:
+    #   - "always_on": Sample all traces (100% sampling) - use for development only
+    #   - "always_off": Never sample traces (0% sampling) - effectively disables tracing
+    #   - "traceidratio": Sample based on trace ID ratio (requires traceSamplerArg)
+    #   - "parentbased_always_on": Respect parent sampling decision, otherwise sample all
+    #   - "parentbased_always_off": Respect parent sampling decision, otherwise sample none  
+    #   - "parentbased_traceidratio": Respect parent sampling decision, otherwise use ratio (default)
     traceSampler: "parentbased_traceidratio"
+    
+    # traceSamplerArg: Sampling ratio for ratio-based samplers
+    # Valid values:
+    #   - "0.0" to "1.0": Sampling ratio (0.0 = 0%, 0.1 = 10%, 1.0 = 100%)
+    #   - Examples:
+    #     - "1.0": Sample all traces (100%) - development/debugging
+    #     - "0.1": Sample 10% of traces - typical production setting
+    #     - "0.01": Sample 1% of traces - high-traffic production systems
+    #     - "0.0": Sample no traces (same as always_off)
+    # Note: Only used with ratio-based samplers (traceidratio, parentbased_traceidratio)
     traceSamplerArg: "1.0"
+    
+    # Metrics exporter configuration
+    # Valid values: "otlp", "prometheus", "logging", "none"
+    metricsExporter: "otlp"
+    
+    # Logs exporter configuration  
+    # Valid values: "otlp", "logging", "none"
+    logsExporter: "none"
+    
     # Instrumentation-specific settings
     instrumentationConfig: {}
       # Example:
       # HTTP_ENABLED: "true"
       # JDBC_ENABLED: "true"
-      # JMS_ENABLED: "false"
-  
+      # JMS_ENABLED: "false"  
 
 # Environment variables
 env: []

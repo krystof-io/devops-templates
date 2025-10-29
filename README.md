@@ -49,6 +49,9 @@ helm template test charts/spring-boot-app
 helm install test ./charts/spring-boot-app \
   --set image.repository=myapp \
   --set image.tag=latest
+
+helm template spring-boot-hello . -f ./sample-values.yaml --namespace kio-dev > wow.yaml
+
 ```
 
 ### Publishing Charts

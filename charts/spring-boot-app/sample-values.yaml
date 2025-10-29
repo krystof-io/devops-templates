@@ -1,20 +1,27 @@
 replicaCount: 1
 
 image:
-  repository: docker-private.build.krystof.io/spring-boot-hello
-  tag: "1.0.0-SNAPSHOT-d248b33"
+  repository: docker-private.build.krystof.io/krystof-io/spring-boot-hello
+  tag: "1.0.0-SNAPSHOT-9744156"
   pullPolicy: Always
 
 imagePullSecrets:
   - name: docker-private-ro
-
+  
 springBoot:
   profiles:
     active: "dev"
 
+opentelemetry:
+  enabled: true
+  serviceName: "spring-boot-hello"
+  endpoint: "http://open-telemetry-collector-daemonset-opentelemetry-collector.monitoring.svc.cluster.local:4317"
+  config:
+    resourceAttributes: "deployment.environment=dev,deployment.namespace=kio-dev"
+        
 traefikIngressRoute:
   enabled: true
-  quickMatch: Host(kiodev.build.krystof.io`) && PathPrefix(`/spring-boot-hello`)
+  quickMatch: Host(`kiodev.build.krystof.io`) && PathPrefix(`/spring-boot-hello`)
   stripPrefix:
       enabled: true
       prefixes: 
