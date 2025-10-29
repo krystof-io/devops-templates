@@ -1,4 +1,4 @@
-name: Build JDK21-maven-git-kubectl-flux image
+name: Build actions-runner-jdk21-maven-git-kubectl-flux
 on:
   workflow_dispatch:
     inputs:
@@ -24,12 +24,12 @@ on:
     branches:
       - main
     paths:
-      - 'jdk-21-maven-git-kubectl-flux/**'
-      - '.github/workflows/jdk-21-maven-git-kubectl-flux.yml'
+      - 'actions-runner-jdk21-maven-git-kubectl-flux/**'
+      - '.github/workflows/actions-runner-jdk21-maven-git-kubectl-flux.yml'
   pull_request:
     paths:
-      - 'jdk-21-maven-git-kubectl-flux/**'
-      - '.github/workflows/jdk-21-maven-git-kubectl-flux.yml'
+      - 'actions-runner-jdk21-maven-git-kubectl-flux/**'
+      - '.github/workflows/actions-runner-jdk21-maven-git-kubectl-flux.yml'
   
 jobs:
   build-and-push:
@@ -74,14 +74,14 @@ jobs:
         echo "| kubectl | \`${{ github.event.inputs.kubectl_version || env.DEFAULT_KUBECTL_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
         echo "| Flux CLI | \`${{ github.event.inputs.flux_version || env.DEFAULT_FLUX_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "**Build Context:** \`./jdk-21-maven-git-kubectl-flux\`" >> $GITHUB_STEP_SUMMARY
+        echo "**Build Context:** \`./Dockerfiles/actions-runner-jdk21-maven-git-kubectl-flux\`" >> $GITHUB_STEP_SUMMARY
         echo "**Push:** \`${{ github.event_name != 'pull_request' }}\`" >> $GITHUB_STEP_SUMMARY
         echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
 
     - name: Build and push Docker image
       uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
       with:
-        context: ./Dockerfiles/jdk-21-maven-git-kubectl-flux
+        context: ./Dockerfiles/actions-runner-jdk21-maven-git-kubectl-flux
         push: ${{ github.event_name != 'pull_request' }}
         build-args: |
           RUNNER_VERSION=${{ github.event.inputs.runner_version || env.DEFAULT_RUNNER_VERSION }}
