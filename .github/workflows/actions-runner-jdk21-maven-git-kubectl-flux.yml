@@ -24,11 +24,11 @@ on:
     branches:
       - main
     paths:
-      - 'actions-runner-jdk21-maven-git-kubectl-flux/**'
+      - 'Dockerfiles/actions-runner-jdk21-maven-git-kubectl-flux/**'
       - '.github/workflows/actions-runner-jdk21-maven-git-kubectl-flux.yml'
   pull_request:
     paths:
-      - 'actions-runner-jdk21-maven-git-kubectl-flux/**'
+      - 'Dockerfiles/actions-runner-jdk21-maven-git-kubectl-flux/**'
       - '.github/workflows/actions-runner-jdk21-maven-git-kubectl-flux.yml'
   
 jobs:
