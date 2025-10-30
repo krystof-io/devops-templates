@@ -20,6 +20,9 @@ on:
       flux_version:
         description: 'Flux CLI Version Override (e.g.: 2.7.2)'
         required: false
+      gh_cli_version:
+        description: 'GitHub CLI Version Override (e.g.: 2.82.1)'
+        required: false
   push:
     branches:
       - main
@@ -43,6 +46,7 @@ jobs:
       DEFAULT_YQ_VERSION: '4.48.1'
       DEFAULT_KUBECTL_VERSION: '1.34.1'
       DEFAULT_FLUX_VERSION: '2.7.2'
+      DEFAULT_GH_CLI_VERSION: '2.82.1'
       DOCKER_BUILD_SUMMARY: true # Set to true to enable detailed build summary
       DOCKER_BUILD_RECORD_UPLOAD: false # Set to true to upload build records as artifacts
     
@@ -73,6 +77,7 @@ jobs:
         echo "| yq | \`${{ github.event.inputs.yq_version || env.DEFAULT_YQ_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
         echo "| kubectl | \`${{ github.event.inputs.kubectl_version || env.DEFAULT_KUBECTL_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
         echo "| Flux CLI | \`${{ github.event.inputs.flux_version || env.DEFAULT_FLUX_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
+        echo "| GitHub CLI | \`${{ github.event.inputs.gh_cli_version || env.DEFAULT_GH_CLI_VERSION }}\` |" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "**Build Context:** \`./Dockerfiles/actions-runner-jdk21-maven-git-kubectl-flux\`" >> $GITHUB_STEP_SUMMARY
         echo "**Push:** \`${{ github.event_name != 'pull_request' }}\`" >> $GITHUB_STEP_SUMMARY
@@ -90,6 +95,7 @@ jobs:
           YQ_VERSION=${{ github.event.inputs.yq_version || env.DEFAULT_YQ_VERSION }}
           KUBECTL_VERSION=${{ github.event.inputs.kubectl_version || env.DEFAULT_KUBECTL_VERSION }}
           FLUX_VERSION=${{ github.event.inputs.flux_version || env.DEFAULT_FLUX_VERSION }}
+          GH_CLI_VERSION=${{ github.event.inputs.gh_cli_version || env.DEFAULT_GH_CLI_VERSION }}
         labels: |
           org.opencontainers.image.title=GitHub Actions Runner - JDK21 + Maven + K8s Tools
           org.opencontainers.image.description=Self-hosted GitHub Actions runner with JDK 21, Maven, kubectl, yq, and Flux CLI
@@ -104,6 +110,7 @@ jobs:
           io.krystof.yq.version=${{ github.event.inputs.yq_version || env.DEFAULT_YQ_VERSION }}
           io.krystof.kubectl.version=${{ github.event.inputs.kubectl_version || env.DEFAULT_KUBECTL_VERSION }}
           io.krystof.flux.version=${{ github.event.inputs.flux_version || env.DEFAULT_FLUX_VERSION }}
+          io.krystof.gh-cli.version=${{ github.event.inputs.gh_cli_version || env.DEFAULT_GH_CLI_VERSION }}
         tags: |
           ${{ vars.IMAGE_REGISTRY_HOST }}/${{ github.repository_owner }}/actions-runner-jdk21-maven-git-kubectl-flux:latest
           ${{ vars.IMAGE_REGISTRY_HOST }}/${{ github.repository_owner }}/actions-runner-jdk21-maven-git-kubectl-flux:${{ github.sha }}
