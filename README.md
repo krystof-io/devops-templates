@@ -27,7 +27,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m
-  url: https://YOUR_USERNAME.github.io/devops-templates/
+  url: https://krystof-io.github.io/devops-templates/
 ```
 
 ## Dockerfiles

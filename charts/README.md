@@ -28,5 +28,6 @@ Update version in `Chart.yaml` before committing.
 
 ```bash
 helm lint charts/spring-boot-app
-helm template test charts/spring-boot-app --debug -f ./sample-values.yaml
+
+helm template test charts/spring-boot-app --debug -f ./charts/spring-boot-app/sample-values.yaml
 ```

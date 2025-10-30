@@ -33,6 +33,15 @@ spec:
       initContainers:
       - name: copy-otel-agent
         image: {{ .Values.opentelemetry.initContainer.image }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 65534
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault        
         command: ['sh', '-c']
         args:
           - |

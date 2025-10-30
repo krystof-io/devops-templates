@@ -2,8 +2,8 @@ apiVersion: v2
 name: spring-boot-app
 description: A Helm chart for Spring Boot applications
 type: application
-version: 0.0.3
-appVersion: "0.0.3"
+version: 0.0.4
+appVersion: "0.0.4"
 keywords:
   - spring-boot
   - java
