@@ -25,6 +25,8 @@ ARG YQ_VERSION=4.48.1
 ARG KUBECTL_VERSION=1.34.1
 # https://github.com/fluxcd/flux2/releases
 ARG FLUX_VERSION=2.7.2
+# https://github.com/cli/cli/releases
+ARG GH_CLI_VERSION=2.82.1
 
 # Switch to root to install packages
 USER root
@@ -85,6 +87,13 @@ RUN wget https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux
     mv flux /usr/local/bin/ && \
     rm flux_${FLUX_VERSION}_linux_amd64.tar.gz && \
     flux --version
+
+# Install GitHub CLI (pinned version for reproducibility)
+RUN wget https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_amd64.tar.gz && \
+    tar xzf gh_${GH_CLI_VERSION}_linux_amd64.tar.gz && \
+    mv gh_${GH_CLI_VERSION}_linux_amd64/bin/gh /usr/local/bin/ && \
+    rm -rf gh_${GH_CLI_VERSION}_linux_amd64* && \
+    gh --version
 
 # Switch back to the default user
 USER runner
