@@ -21,6 +21,9 @@ spec:
         {{- end }}
       labels:
         {{- include "spring-boot-app.selectorLabels" . | nindent 8 }}
+        {{- if .Values.opentelemetry.enabled }}
+        otel.logs.exporter: {{ .Values.opentelemetry.config.logsExporter | quote }}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:

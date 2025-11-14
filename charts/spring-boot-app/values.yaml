@@ -228,7 +228,7 @@ opentelemetry:
     
     # Logs exporter configuration  
     # Valid values: "otlp", "logging", "none"
-    logsExporter: "none"
+    logsExporter: "otlp"
     
     # Instrumentation-specific settings
     instrumentationConfig: {}
