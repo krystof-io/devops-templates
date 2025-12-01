@@ -1,3 +1,12 @@
+{{- if not (kindIs "float64" .Values.service.port) }}
+{{- fail "service.port must be an integer" }}
+{{- end }}
+{{- if not (kindIs "float64" .Values.service.targetPort) }}
+{{- fail "service.targetPort must be an integer" }}
+{{- end }}
+{{- if not (kindIs "float64" .Values.springBoot.management.port) }}
+{{- fail "springBoot.management.port must be an integer" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -9,13 +18,19 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  {{- with .Values.deploymentStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "spring-boot-app.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.configMap.enabled }}
+        checksum/config: {{ .Values.configMap.data | toYaml | sha256sum }}
+        {{- end }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -30,6 +45,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "spring-boot-app.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- if .Values.opentelemetry.enabled }}
@@ -127,6 +143,10 @@ spec:
           value: {{ .Values.opentelemetry.config.metricsExporter | quote }}
         - name: OTEL_LOGS_EXPORTER
           value: {{ .Values.opentelemetry.config.logsExporter | quote }}
+        {{- if ne .Values.opentelemetry.config.logsExporter "none" }}
+        - name: OTEL_INSTRUMENTATION_LOGBACK_APPENDER_EXPERIMENTAL_LOG_ATTRIBUTES
+          value: "true"
+        {{- end }}
         {{- range $key, $value := .Values.opentelemetry.config.instrumentationConfig }}
         - name: {{ printf "OTEL_INSTRUMENTATION_%s" ($key | upper) }}
           value: {{ $value | quote }}
@@ -158,6 +178,7 @@ spec:
           periodSeconds: {{ .Values.springBoot.readinessProbe.periodSeconds }}
           timeoutSeconds: {{ .Values.springBoot.readinessProbe.timeoutSeconds }}
           failureThreshold: {{ .Values.springBoot.readinessProbe.failureThreshold }}
+          successThreshold: {{ .Values.springBoot.readinessProbe.successThreshold }}
         {{- end }}
         {{- if .Values.springBoot.startupProbe.enabled }}
         startupProbe:
@@ -171,6 +192,12 @@ spec:
         {{- end }}
         resources:
           {{- toYaml .Values.resources | nindent 12 }}
+        {{- if .Values.lifecycle.preStop.enabled }}
+        lifecycle:
+          preStop:
+            exec:
+              command: ["sleep", "{{ .Values.lifecycle.preStop.sleepSeconds }}"]
+        {{- end }}
         {{- $needsVolumeMounts := or .Values.volumeMounts .Values.securityContext.readOnlyRootFilesystem .Values.opentelemetry.enabled .Values.persistence.data.enabled .Values.persistence.logs.enabled .Values.persistence.work.enabled }}
         {{- if $needsVolumeMounts }}
         volumeMounts:
@@ -232,5 +259,9 @@ spec:
       {{- end }}
       {{- with .Values.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}

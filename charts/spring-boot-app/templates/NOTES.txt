@@ -1,0 +1,46 @@
+{{- $fullName := include "spring-boot-app.fullname" . -}}
+Deployed {{ $fullName }} successfully!
+
+=== Access Your Application ===
+{{- if .Values.ingress.enabled }}
+Application URL:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ (index .paths 0).path }}
+{{- end }}
+{{- else if .Values.traefikIngressRoute.enabled }}
+Application URL (via Traefik IngressRoute):
+{{- range .Values.traefikIngressRoute.routes }}
+  Check your Traefik dashboard or use: {{ .match }}
+{{- end }}
+{{- else }}
+No ingress configured. Access via port-forward:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ $fullName }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  Then open: http://localhost:{{ .Values.service.port }}
+{{- end }}
+
+=== Check Status ===
+View pod status:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "spring-boot-app.name" . }},app.kubernetes.io/instance={{ .Release.Name }}
+
+View logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "spring-boot-app.name" . }},app.kubernetes.io/instance={{ .Release.Name }} -f
+
+{{- if .Values.springBoot.management.enabled }}
+
+=== Spring Boot Actuator ===
+{{- if .Values.ingress.enabled }}
+Health: http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}/actuator/health
+Info:   http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}/actuator/info
+{{- else }}
+Health check (via port-forward to management port):
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ $fullName }} {{ .Values.springBoot.management.port }}:{{ .Values.springBoot.management.port }}
+  Then open: http://localhost:{{ .Values.springBoot.management.port }}/actuator/health
+{{- end }}
+{{- end }}
+
+{{- if .Values.opentelemetry.enabled }}
+
+=== OpenTelemetry ===
+Telemetry is enabled and sending to: {{ .Values.opentelemetry.endpoint }}
+Service name: {{ .Values.opentelemetry.serviceName | default $fullName }}
+{{- end }}

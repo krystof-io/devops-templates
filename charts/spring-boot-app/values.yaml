@@ -1,6 +1,14 @@
 # Default values for spring-boot-app
 replicaCount: 1
 
+# Deployment strategy for zero-downtime deployments
+# type: RollingUpdate or Recreate
+deploymentStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
 image:
   repository: your-registry/your-app
   pullPolicy: IfNotPresent
@@ -24,9 +32,22 @@ nameOverride: ""
 fullnameOverride: ""
 
 serviceAccount:
-  create: false
+  create: true
+  # Set to true if your app needs to interact with the Kubernetes API (e.g., Spring Cloud Kubernetes)
+  automountServiceAccountToken: false
   annotations: {}
   name: ""
+
+# Time to wait for graceful shutdown before SIGKILL (matches Spring Boot default)
+terminationGracePeriodSeconds: 30
+
+# Lifecycle hooks
+lifecycle:
+  preStop:
+    # Enable preStop hook to allow load balancers to drain connections before shutdown
+    enabled: true
+    # Seconds to wait before SIGTERM (gives Traefik/ingress time to update routing)
+    sleepSeconds: 5
 
 podAnnotations: {}
 
@@ -164,6 +185,7 @@ springBoot:
     periodSeconds: 10
     timeoutSeconds: 5
     failureThreshold: 3
+    successThreshold: 1
 
   # Startup probe configuration (useful for slow-starting apps)
   startupProbe:
@@ -197,7 +219,7 @@ opentelemetry:
   config:
     # Resource attributes (key=value,key2=value2)
     resourceAttributes: ""
-    # Add thread details to spans/logs for better debugging
+    # Add thread details to spans for better debugging
     javaagentAddThreadDetails: "true"
     # OTLP exporter protocol (grpc, http/protobuf, http/json)
     otlpProtocol: "grpc"
@@ -331,6 +353,16 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# Topology spread constraints for distributing pods across failure domains
+# Example for spreading across zones:
+#   - maxSkew: 1
+#     topologyKey: topology.kubernetes.io/zone
+#     whenUnsatisfiable: ScheduleAnyway
+#     labelSelector:
+#       matchLabels:
+#         app.kubernetes.io/name: my-app
+topologySpreadConstraints: []
 
 # Pod disruption budget
 podDisruptionBudget:
