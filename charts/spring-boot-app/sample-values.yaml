@@ -18,10 +18,11 @@ opentelemetry:
   endpoint: "http://open-telemetry-collector-daemonset-opentelemetry-collector.monitoring.svc.cluster.local:4317"
   config:
     resourceAttributes: "deployment.environment=dev,deployment.namespace=kio-dev"
+    javaagentAddThreadDetails: "true"
         
 traefikIngressRoute:
   enabled: true
-  quickMatch: Host(`kiodev.build.krystof.io`) && PathPrefix(`/spring-boot-hello`)
+  quickMatch: Host(`kio-dev.build.krystof.io`) && PathPrefix(`/spring-boot-hello`)
   stripPrefix:
       enabled: true
       prefixes: 

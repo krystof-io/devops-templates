@@ -117,6 +117,8 @@ spec:
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: {{ .Values.opentelemetry.config.resourceAttributes | quote }}
         {{- end }}
+        - name: OTEL_JAVAAGENT_ADD_THREAD_DETAILS
+          value: {{ .Values.opentelemetry.config.javaagentAddThreadDetails | quote }}        
         - name: OTEL_TRACES_SAMPLER
           value: {{ .Values.opentelemetry.config.traceSampler | quote }}
         - name: OTEL_TRACES_SAMPLER_ARG

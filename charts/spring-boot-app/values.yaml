@@ -197,6 +197,8 @@ opentelemetry:
   config:
     # Resource attributes (key=value,key2=value2)
     resourceAttributes: ""
+    # Add thread details to spans/logs for better debugging
+    javaagentAddThreadDetails: "true"
     # OTLP exporter protocol (grpc, http/protobuf, http/json)
     otlpProtocol: "grpc"
     
