@@ -14,6 +14,18 @@ spec:
   {{- if .Values.traefikIngressRoute.tls.secretName }}
   tls:
     secretName: {{ .Values.traefikIngressRoute.tls.secretName }}
+    {{- if .Values.traefikIngressRoute.tls.domains }}
+    domains:
+      {{- range .Values.traefikIngressRoute.tls.domains }}
+      - main: {{ .main }}
+        {{- if .sans }}
+        sans:
+          {{- range .sans }}
+          - {{ . }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
   {{- end }}
   routes:
     {{- range .Values.traefikIngressRoute.routes }}

@@ -99,6 +99,13 @@ traefikIngressRoute:
     # Secret name containing the TLS certificate (optional)
     # If set, enables TLS termination using the specified secret
     secretName: ""
+    # Domains for SNI matching (required for Traefik to serve the correct cert)
+    # Example:
+    #   domains:
+    #     - main: app.example.com
+    #       sans:
+    #         - www.app.example.com
+    domains: []
   # StripPrefix middleware configuration
   stripPrefix:
     enabled: false
