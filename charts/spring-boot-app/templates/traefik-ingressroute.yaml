@@ -11,26 +11,10 @@ spec:
     {{- range .Values.traefikIngressRoute.entryPoints }}
     - {{ . }}
     {{- end }}
-  {{- if or .Values.traefikIngressRoute.tls.enabled .Values.traefikIngressRoute.tls.store .Values.traefikIngressRoute.tls.secretName }}
+  {{- if or .Values.traefikIngressRoute.tls.enabled .Values.traefikIngressRoute.tls.secretName }}
   tls:
-    {{- if .Values.traefikIngressRoute.tls.store }}
-    store:
-      name: {{ .Values.traefikIngressRoute.tls.store }}
-    {{- end }}
     {{- if .Values.traefikIngressRoute.tls.secretName }}
     secretName: {{ .Values.traefikIngressRoute.tls.secretName }}
-    {{- if .Values.traefikIngressRoute.tls.domains }}
-    domains:
-      {{- range .Values.traefikIngressRoute.tls.domains }}
-      - main: {{ .main | quote }}
-        {{- if .sans }}
-        sans:
-          {{- range .sans }}
-          - {{ . | quote }}
-          {{- end }}
-        {{- end }}
-      {{- end }}
-    {{- end }}
     {{- end }}
   {{- end }}
   routes:
