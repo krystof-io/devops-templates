@@ -17,11 +17,11 @@ spec:
     {{- if .Values.traefikIngressRoute.tls.domains }}
     domains:
       {{- range .Values.traefikIngressRoute.tls.domains }}
-      - main: {{ .main }}
+      - main: {{ .main | quote }}
         {{- if .sans }}
         sans:
           {{- range .sans }}
-          - {{ . }}
+          - {{ . | quote }}
           {{- end }}
         {{- end }}
       {{- end }}
