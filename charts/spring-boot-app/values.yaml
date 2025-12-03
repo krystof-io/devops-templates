@@ -96,10 +96,16 @@ traefikIngressRoute:
     - websecure
   # TLS configuration
   tls:
+    # Enable TLS (set to true to enable, even without other options for default cert)
+    enabled: false
+    # TLSStore name to use (recommended for cross-namespace certificates)
+    # Reference a TLSStore that exists in the Traefik namespace
+    # Example: "private-krystof-io"
+    store: ""
     # Secret name containing the TLS certificate (optional)
-    # If set, enables TLS termination using the specified secret
+    # Only use if the secret is in the SAME namespace as the IngressRoute
     secretName: ""
-    # Domains for SNI matching (required for Traefik to serve the correct cert)
+    # Domains for SNI matching (only needed with secretName, not with store)
     # Example:
     #   domains:
     #     - main: app.example.com
