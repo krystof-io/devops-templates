@@ -11,6 +11,10 @@ spec:
     {{- range .Values.traefikIngressRoute.entryPoints }}
     - {{ . }}
     {{- end }}
+  {{- if .Values.traefikIngressRoute.tls.secretName }}
+  tls:
+    secretName: {{ .Values.traefikIngressRoute.tls.secretName }}
+  {{- end }}
   routes:
     {{- range .Values.traefikIngressRoute.routes }}
     - match: {{ if $.Values.traefikIngressRoute.quickMatch }}{{ $.Values.traefikIngressRoute.quickMatch }}{{ else }}{{ .match }}{{ end }}

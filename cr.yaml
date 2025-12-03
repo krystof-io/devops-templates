@@ -4,3 +4,4 @@ charts-dir: charts
 index-path: index.yaml
 packages-with-index: true
 push: true
+generate-release-notes: true

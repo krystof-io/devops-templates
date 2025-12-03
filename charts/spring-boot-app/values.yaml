@@ -94,6 +94,11 @@ traefikIngressRoute:
   entryPoints:
     - web
     - websecure
+  # TLS configuration
+  tls:
+    # Secret name containing the TLS certificate (optional)
+    # If set, enables TLS termination using the specified secret
+    secretName: ""
   # StripPrefix middleware configuration
   stripPrefix:
     enabled: false
