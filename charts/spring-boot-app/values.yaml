@@ -215,7 +215,7 @@ opentelemetry:
   endpoint: "http://otel-collector:4318/v1/traces"
   # Init container image for copying the agent from utilities image
   initContainer:
-    image: "docker-private.build.krystof.io/krystof-io/init-utilities:latest"
+    image: "docker-private.private.krystof.io/krystof-io/init-utilities:latest"
     resources:
       limits:
         cpu: 100m

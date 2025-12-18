@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: docker-private.build.krystof.io/krystof-io/spring-boot-hello
+  repository: docker-private.private.krystof.io/krystof-io/spring-boot-hello
   tag: "1.0.0-SNAPSHOT-9744156"
   pullPolicy: Always
 
@@ -22,7 +22,7 @@ opentelemetry:
         
 traefikIngressRoute:
   enabled: true
-  quickMatch: Host(`kio-dev.build.krystof.io`) && PathPrefix(`/spring-boot-hello`)
+  quickMatch: Host(`kio-dev.private.krystof.io`) && PathPrefix(`/spring-boot-hello`)
   stripPrefix:
       enabled: true
       prefixes: 
