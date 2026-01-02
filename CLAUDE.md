@@ -63,7 +63,7 @@ helm template test charts/spring-boot-app -f charts/spring-boot-app/sample-value
 Update `Chart.yaml` version before committing. Uses semantic versioning.
 
 ### Private registry
-Images pushed to `docker-private.build.krystof.io/krystof-io/`
+Images pushed to `docker-private.privpub.krystof.io/krystof-io/`
 
 ### OpenTelemetry versions
 Managed in `Dockerfiles/init-utilities/versions.yaml`. Current default: 2.21.0
