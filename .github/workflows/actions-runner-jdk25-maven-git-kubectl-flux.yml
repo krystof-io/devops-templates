@@ -6,7 +6,7 @@ on:
         description: 'GitHub Actions Runner Base Image Version (e.g.: latest)'
         required: false
       jdk_version:
-        description: 'JDK Version Override (e.g.: 25.0.1.0.0+8-1)'
+        description: 'JDK Version Override (e.g.: 25.0.1.0.0+8-0)'
         required: false
       maven_version:
         description: 'Maven Version Override (e.g.: 3.9.12)'
@@ -41,7 +41,7 @@ jobs:
     env:
       # Default versions - single source of truth
       DEFAULT_RUNNER_VERSION: 'latest'
-      DEFAULT_JDK_VERSION: '25.0.1.0.0+8-1'
+      DEFAULT_JDK_VERSION: '25.0.1.0.0+8-0'
       DEFAULT_MAVEN_VERSION: '3.9.12'
       DEFAULT_YQ_VERSION: '4.50.1'
       DEFAULT_KUBECTL_VERSION: '1.35.0'
