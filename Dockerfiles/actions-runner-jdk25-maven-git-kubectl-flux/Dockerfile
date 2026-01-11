@@ -7,7 +7,7 @@ FROM ghcr.io/actions/actions-runner:${RUNNER_VERSION}
 # Define versions for easy maintenance
 # https://adoptium.net/temurin/releases
 # Temurin version:  25.0.1+8
-# Package version:  25.0.1.0.0+8-1
+# Package version:  25.0.1.0.0+8-0
 #                   │  │ │ │ │ │ └─ Package revision (Debian/Ubuntu packaging)
 #                   │  │ │ │ │ └─── Build number (from Temurin)
 #                   │  │ │ │ └───── Extra field (unused, set to 0)
@@ -15,7 +15,8 @@ FROM ghcr.io/actions/actions-runner:${RUNNER_VERSION}
 #                   │  │ └───────── Patch version (1)
 #                   │  └──────────── Minor version (0)
 #                   └─────────────── Major version (25)
-ARG JDK_VERSION=25.0.1.0.0+8-1
+
+ARG JDK_VERSION=25.0.1.0.0+8-0
 # https://maven.apache.org/download.cgi
 ARG MAVEN_VERSION=3.9.12
 # https://github.com/mikefarah/yq/releases
