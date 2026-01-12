@@ -27,6 +27,8 @@ ARG KUBECTL_VERSION=1.34.1
 ARG FLUX_VERSION=2.7.2
 # https://github.com/cli/cli/releases
 ARG GH_CLI_VERSION=2.82.1
+# https://github.com/nodesource/distributions
+ARG NODE_MAJOR_VERSION=22
 
 # Switch to root to install packages
 USER root
@@ -94,6 +96,17 @@ RUN wget https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH
     mv gh_${GH_CLI_VERSION}_linux_amd64/bin/gh /usr/local/bin/ && \
     rm -rf gh_${GH_CLI_VERSION}_linux_amd64* && \
     gh --version
+
+# Install Node.js and npm (pinned major version for reproducibility)
+RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR_VERSION}.x | bash - && \
+    apt-get install -y nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    node --version && npm --version
+
+# Install openapi-diff globally
+RUN npm install -g openapi-diff && \
+    openapi-diff --version
 
 # Switch back to the default user
 USER runner
