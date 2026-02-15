@@ -39,6 +39,13 @@ spec:
         {{- range .services }}
         - name: {{ .name | default (include "spring-boot-app.fullname" $) }}
           port: {{ .port | default $.Values.service.port }}
+          {{- if $.Values.traefikIngressRoute.stickiness.enabled }}
+          sticky:
+            cookie:
+              name: {{ $.Values.traefikIngressRoute.stickiness.cookie.name | default (printf "%s-sticky" (include "spring-boot-app.fullname" $)) }}
+              secure: {{ $.Values.traefikIngressRoute.stickiness.cookie.secure }}
+              httpOnly: {{ $.Values.traefikIngressRoute.stickiness.cookie.httpOnly }}
+          {{- end }}
         {{- end }}
     {{- end }}
 {{- end }}

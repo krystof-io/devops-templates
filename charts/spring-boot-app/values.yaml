@@ -109,6 +109,15 @@ traefikIngressRoute:
     prefixes: []
     # Custom middleware name (defaults to "<release>-strip-prefix")
     middlewareName: ""
+  # Session stickiness (cookie-based affinity)
+  # Useful for Spring Boot apps with in-memory session state
+  stickiness:
+    enabled: false
+    cookie:
+      # Cookie name - defaults to "<release-fullname>-sticky" if empty
+      name: ""
+      secure: true
+      httpOnly: true
   routes:
     - match: Host(`app.example.com`)
       kind: Rule
