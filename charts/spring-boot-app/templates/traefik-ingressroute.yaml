@@ -21,12 +21,18 @@ spec:
     {{- range .Values.traefikIngressRoute.routes }}
     - match: {{ if $.Values.traefikIngressRoute.quickMatch }}{{ $.Values.traefikIngressRoute.quickMatch }}{{ else }}{{ .match }}{{ end }}
       kind: {{ .kind }}
-      {{- $hasMiddlewares := or .middlewares $.Values.traefikIngressRoute.stripPrefix.enabled }}
+      {{- $hasMiddlewares := or .middlewares $.Values.traefikIngressRoute.stripPrefix.enabled $.Values.traefikIngressRoute.additionalMiddlewares }}
       {{- if $hasMiddlewares }}
       middlewares:
         {{- if $.Values.traefikIngressRoute.stripPrefix.enabled }}
         - name: {{ $.Values.traefikIngressRoute.stripPrefix.middlewareName | default (printf "%s-strip-prefix" (include "spring-boot-app.fullname" $)) }}
           namespace: {{ $.Release.Namespace }}
+        {{- end }}
+        {{- range $.Values.traefikIngressRoute.additionalMiddlewares }}
+        - name: {{ .name }}
+          {{- if .namespace }}
+          namespace: {{ .namespace }}
+          {{- end }}
         {{- end }}
         {{- range .middlewares }}
         - name: {{ .name }}

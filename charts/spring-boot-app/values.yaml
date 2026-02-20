@@ -109,6 +109,13 @@ traefikIngressRoute:
     prefixes: []
     # Custom middleware name (defaults to "<release>-strip-prefix")
     middlewareName: ""
+  # Additional middlewares to include in routes
+  # Useful with quickMatch to avoid defining the full routes array
+  additionalMiddlewares: []
+    # - name: mw-internal-ipwhitelist
+    #   namespace: traefik
+    # - name: mw-redirect-to-https
+    #   namespace: traefik
   # Session stickiness (cookie-based affinity)
   # Useful for Spring Boot apps with in-memory session state
   stickiness:
