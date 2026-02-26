@@ -21,6 +21,9 @@ spec:
     {{- range .Values.traefikIngressRoute.routes }}
     - match: {{ if $.Values.traefikIngressRoute.quickMatch }}{{ $.Values.traefikIngressRoute.quickMatch }}{{ else }}{{ .match }}{{ end }}
       kind: {{ .kind }}
+      {{- if $.Values.traefikIngressRoute.priority }}
+      priority: {{ $.Values.traefikIngressRoute.priority }}
+      {{- end }}
       {{- $hasMiddlewares := or .middlewares $.Values.traefikIngressRoute.stripPrefix.enabled $.Values.traefikIngressRoute.additionalMiddlewares }}
       {{- if $hasMiddlewares }}
       middlewares:

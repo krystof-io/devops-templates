@@ -91,6 +91,11 @@ ingress:
 traefikIngressRoute:
   enabled: false
   quickMatch: "" # If set, will override the route match line
+  # Traefik route priority (optional). Higher values match first.
+  # If not set, Traefik calculates priority from rule length.
+  # Use a low value (e.g., 1) for catch-all routes like PathPrefix(`/`)
+  # so more specific routes from other services match first.
+  priority:
   entryPoints:
     - web
     - websecure
