@@ -308,6 +308,16 @@ ffmpeg:
   # Binaries will be available at <mountPath>/ffmpeg and <mountPath>/ffprobe
   mountPath: /opt/ffmpeg
 
+# Secret file mounts
+# Mount Kubernetes Secrets as files instead of environment variables.
+# Spring Boot can read these via config tree: spring.config.import=optional:configtree:/app/secrets/
+# Each secret is mounted at its own subpath under the base mountPath.
+secretMounts: []
+  # - secretName: my-app-db-credentials    # Name of existing K8s Secret
+  #   mountPath: /app/secrets/db            # Where to mount in the container
+  # - secretName: my-app-oauth-secrets
+  #   mountPath: /app/secrets/oauth
+
 # Environment variables
 env: []
   # - name: JAVA_OPTS

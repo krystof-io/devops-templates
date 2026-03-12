@@ -225,11 +225,16 @@ spec:
             exec:
               command: ["sleep", "{{ .Values.lifecycle.preStop.sleepSeconds }}"]
         {{- end }}
-        {{- $needsVolumeMounts := or .Values.volumeMounts .Values.securityContext.readOnlyRootFilesystem .Values.opentelemetry.enabled .Values.ffmpeg.enabled .Values.persistence.data.enabled .Values.persistence.logs.enabled .Values.persistence.work.enabled }}
+        {{- $needsVolumeMounts := or .Values.volumeMounts .Values.secretMounts .Values.securityContext.readOnlyRootFilesystem .Values.opentelemetry.enabled .Values.ffmpeg.enabled .Values.persistence.data.enabled .Values.persistence.logs.enabled .Values.persistence.work.enabled }}
         {{- if $needsVolumeMounts }}
         volumeMounts:
         {{- with .Values.volumeMounts }}
           {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- range .Values.secretMounts }}
+        - name: secret-{{ .secretName }}
+          mountPath: {{ .mountPath }}
+          readOnly: true
         {{- end }}
         {{- if .Values.opentelemetry.enabled }}
         - name: otel-agent
@@ -252,11 +257,16 @@ spec:
           mountPath: /tmp
         {{- end }}
         {{- end }}
-      {{- $needsVolumes := or .Values.volumes .Values.securityContext.readOnlyRootFilesystem .Values.opentelemetry.enabled .Values.ffmpeg.enabled .Values.persistence.data.enabled .Values.persistence.logs.enabled .Values.persistence.work.enabled }}
+      {{- $needsVolumes := or .Values.volumes .Values.secretMounts .Values.securityContext.readOnlyRootFilesystem .Values.opentelemetry.enabled .Values.ffmpeg.enabled .Values.persistence.data.enabled .Values.persistence.logs.enabled .Values.persistence.work.enabled }}
       {{- if $needsVolumes }}
       volumes:
       {{- with .Values.volumes }}
         {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- range .Values.secretMounts }}
+      - name: secret-{{ .secretName }}
+        secret:
+          secretName: {{ .secretName }}
       {{- end }}
       {{- if .Values.opentelemetry.enabled }}
       - name: otel-agent
