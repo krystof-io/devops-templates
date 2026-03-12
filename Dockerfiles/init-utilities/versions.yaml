@@ -1,9 +1,18 @@
 # OpenTelemetry Java Agent versions to include
 opentelemetry:
   # Which version should 'latest' symlink point to
-  default: "2.21.0"
-  
+  default: "2.25.0"
+
   # All versions to include in the image
   versions:
+    - "2.25.0"
     - "2.21.0"
-    - "2.20.0"
+
+# FFmpeg static build from https://github.com/BtbN/FFmpeg-Builds
+ffmpeg:
+  # Release branch (e.g., "7.1", "8.0")
+  branch: "7.1"
+  # Pinned autobuild tag for reproducible builds
+  autobuild: "autobuild-2026-03-11-19-41"
+  # Architecture: amd64 or arm64
+  arch: "amd64"

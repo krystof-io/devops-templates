@@ -1,19 +1,20 @@
 FROM debian:stable AS downloader
 
-RUN apt-get update && apt-get install -y wget
+RUN apt-get update && apt-get install -y wget xz-utils
 
 # Copy versions file
 COPY versions.yaml /tmp/versions.yaml
 
-# Download script
+# Download OpenTelemetry agents
 COPY download-otel-agents.sh /tmp/download-otel-agents.sh
 RUN chmod +x /tmp/download-otel-agents.sh
-
-# Create directory structure
 RUN mkdir -p /utilities/otel-agents
-
-# Download all versions
 RUN /tmp/download-otel-agents.sh
+
+# Download FFmpeg
+COPY download-ffmpeg.sh /tmp/download-ffmpeg.sh
+RUN chmod +x /tmp/download-ffmpeg.sh
+RUN /tmp/download-ffmpeg.sh
 
 # Final minimal image
 FROM busybox:latest

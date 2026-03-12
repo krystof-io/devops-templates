@@ -48,8 +48,9 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      {{- if .Values.opentelemetry.enabled }}
+      {{- if or .Values.opentelemetry.enabled .Values.ffmpeg.enabled }}
       initContainers:
+      {{- if .Values.opentelemetry.enabled }}
       - name: copy-otel-agent
         image: {{ .Values.opentelemetry.initContainer.image }}
         securityContext:
@@ -60,7 +61,7 @@ spec:
             drop:
             - ALL
           seccompProfile:
-            type: RuntimeDefault        
+            type: RuntimeDefault
         command: ['sh', '-c']
         args:
           - |
@@ -72,6 +73,32 @@ spec:
           mountPath: /otel
         resources:
           {{- toYaml .Values.opentelemetry.initContainer.resources | nindent 12 }}
+      {{- end }}
+      {{- if .Values.ffmpeg.enabled }}
+      - name: copy-ffmpeg
+        image: {{ .Values.ffmpeg.initContainer.image }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 65534
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        command: ['sh', '-c']
+        args:
+          - |
+            echo "Copying ffmpeg binaries..."
+            cp /utilities/ffmpeg/ffmpeg /ffmpeg-bin/ffmpeg
+            cp /utilities/ffmpeg/ffprobe /ffmpeg-bin/ffprobe
+            echo "Copy completed successfully"
+        volumeMounts:
+        - name: ffmpeg-bin
+          mountPath: /ffmpeg-bin
+        resources:
+          {{- toYaml .Values.ffmpeg.initContainer.resources | nindent 12 }}
+      {{- end }}
       {{- end }}
       containers:
       - name: {{ .Chart.Name }}
@@ -198,7 +225,7 @@ spec:
             exec:
               command: ["sleep", "{{ .Values.lifecycle.preStop.sleepSeconds }}"]
         {{- end }}
-        {{- $needsVolumeMounts := or .Values.volumeMounts .Values.securityContext.readOnlyRootFilesystem .Values.opentelemetry.enabled .Values.persistence.data.enabled .Values.persistence.logs.enabled .Values.persistence.work.enabled }}
+        {{- $needsVolumeMounts := or .Values.volumeMounts .Values.securityContext.readOnlyRootFilesystem .Values.opentelemetry.enabled .Values.ffmpeg.enabled .Values.persistence.data.enabled .Values.persistence.logs.enabled .Values.persistence.work.enabled }}
         {{- if $needsVolumeMounts }}
         volumeMounts:
         {{- with .Values.volumeMounts }}
@@ -207,6 +234,11 @@ spec:
         {{- if .Values.opentelemetry.enabled }}
         - name: otel-agent
           mountPath: /otel
+          readOnly: true
+        {{- end }}
+        {{- if .Values.ffmpeg.enabled }}
+        - name: ffmpeg-bin
+          mountPath: {{ .Values.ffmpeg.mountPath }}
           readOnly: true
         {{- end }}
         {{- range $name, $config := .Values.persistence }}
@@ -220,7 +252,7 @@ spec:
           mountPath: /tmp
         {{- end }}
         {{- end }}
-      {{- $needsVolumes := or .Values.volumes .Values.securityContext.readOnlyRootFilesystem .Values.opentelemetry.enabled .Values.persistence.data.enabled .Values.persistence.logs.enabled .Values.persistence.work.enabled }}
+      {{- $needsVolumes := or .Values.volumes .Values.securityContext.readOnlyRootFilesystem .Values.opentelemetry.enabled .Values.ffmpeg.enabled .Values.persistence.data.enabled .Values.persistence.logs.enabled .Values.persistence.work.enabled }}
       {{- if $needsVolumes }}
       volumes:
       {{- with .Values.volumes }}
@@ -228,6 +260,10 @@ spec:
       {{- end }}
       {{- if .Values.opentelemetry.enabled }}
       - name: otel-agent
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.ffmpeg.enabled }}
+      - name: ffmpeg-bin
         emptyDir: {}
       {{- end }}
       {{- range $name, $config := .Values.persistence }}

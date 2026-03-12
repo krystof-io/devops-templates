@@ -229,7 +229,7 @@ springBoot:
 opentelemetry:
   enabled: false
   # OpenTelemetry Java agent version (used to locate the agent jar in init utilities image)
-  agentVersion: "2.21.0"
+  agentVersion: "2.25.0"
   # Service name for traces (defaults to chart fullname if empty)
   serviceName: ""
   # OTLP endpoint (where to send telemetry data)
@@ -289,6 +289,24 @@ opentelemetry:
       # HTTP_ENABLED: "true"
       # JDBC_ENABLED: "true"
       # JMS_ENABLED: "false"  
+
+# FFmpeg configuration
+# Copies ffmpeg/ffprobe binaries from init-utilities image into the app container
+ffmpeg:
+  enabled: false
+  # Init container image containing ffmpeg binaries
+  initContainer:
+    image: "docker-private.privpub.krystof.io/krystof-io/init-utilities:latest"
+    resources:
+      limits:
+        cpu: 100m
+        memory: 64Mi
+      requests:
+        cpu: 50m
+        memory: 32Mi
+  # Mount path for ffmpeg binaries in the app container
+  # Binaries will be available at <mountPath>/ffmpeg and <mountPath>/ffprobe
+  mountPath: /opt/ffmpeg
 
 # Environment variables
 env: []
