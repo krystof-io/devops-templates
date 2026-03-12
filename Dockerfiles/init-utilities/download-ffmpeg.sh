@@ -30,12 +30,12 @@ RELEASE_URL="https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/${FFM
 echo "Querying release ${FFMPEG_AUTOBUILD} for FFmpeg ${FFMPEG_BRANCH} (${FFMPEG_ARCH})..."
 
 ASSET_INFO=$(wget -q -O - "$RELEASE_URL" | \
-    grep -o '"name":"[^"]*"' | \
+    grep -o '"name" *: *"[^"]*"' | \
     grep "n${FFMPEG_BRANCH}" | \
     grep "${BTBN_ARCH}-gpl-${FFMPEG_BRANCH}" | \
     grep -v "shared" | \
     head -1 | \
-    sed 's/"name":"//;s/"//')
+    sed 's/"name" *: *"//;s/"//')
 
 if [ -z "$ASSET_INFO" ]; then
     echo "Error: Could not find FFmpeg ${FFMPEG_BRANCH} asset for ${BTBN_ARCH} in release ${FFMPEG_AUTOBUILD}"
