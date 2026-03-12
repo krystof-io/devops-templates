@@ -4,10 +4,10 @@
 # Location: docker-templates repo at java/spring-boot/Dockerfile
 #
 # Build Args:
-#   BASE_IMAGE - Base Docker image (default: eclipse-temurin:17-jre-alpine)
+#   BASE_IMAGE - Base Docker image (default: eclipse-temurin:17-jre)
 #   JAR_FILE - Path to the JAR file to copy (required)
 
-ARG BASE_IMAGE=eclipse-temurin:17-jre-alpine
+ARG BASE_IMAGE=eclipse-temurin:17-jre
 FROM ${BASE_IMAGE}
 
 # Metadata
@@ -18,7 +18,7 @@ LABEL description="Generic Spring Boot application container"
 ARG JAR_FILE
 
 # Create app user for security (don't run as root)
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN groupadd --system appgroup && useradd --system --gid appgroup appuser
 
 # Set working directory
 WORKDIR /app
