@@ -2,7 +2,7 @@
 # https://github.com/actions/runner/releases
 # https://github.com/actions/runner/pkgs/container/actions-runner
 ARG RUNNER_VERSION=latest
-FROM ghcr.io/actions/actions-runner:${RUNNER_VERSION}
+FROM ghcr-proxy.private.krystof.io/actions/actions-runner:${RUNNER_VERSION}
 
 # Define versions for easy maintenance
 # https://adoptium.net/temurin/releases
