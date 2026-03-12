@@ -3,9 +3,9 @@ set -e
 
 echo "Downloading FFmpeg based on versions.yaml..."
 
-FFMPEG_BRANCH=$(grep -A 5 "^ffmpeg:" /tmp/versions.yaml | grep "branch:" | sed 's/.*"\(.*\)".*/\1/')
-FFMPEG_AUTOBUILD=$(grep -A 5 "^ffmpeg:" /tmp/versions.yaml | grep "autobuild:" | sed 's/.*"\(.*\)".*/\1/')
-FFMPEG_ARCH=$(grep -A 5 "^ffmpeg:" /tmp/versions.yaml | grep "arch:" | sed 's/.*"\(.*\)".*/\1/')
+FFMPEG_BRANCH=$(grep -A 10 "^ffmpeg:" /tmp/versions.yaml | grep "branch:" | sed 's/.*"\(.*\)".*/\1/')
+FFMPEG_AUTOBUILD=$(grep -A 10 "^ffmpeg:" /tmp/versions.yaml | grep "autobuild:" | sed 's/.*"\(.*\)".*/\1/')
+FFMPEG_ARCH=$(grep -A 10 "^ffmpeg:" /tmp/versions.yaml | grep "arch:" | sed 's/.*"\(.*\)".*/\1/')
 
 if [ -z "$FFMPEG_BRANCH" ]; then
     echo "No FFmpeg branch configured, skipping."
