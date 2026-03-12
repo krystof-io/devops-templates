@@ -1,4 +1,4 @@
-FROM debian:stable AS downloader
+FROM docker-private.private.krystof.io/debian:stable AS downloader
 
 RUN apt-get update && apt-get install -y wget xz-utils
 
@@ -17,7 +17,7 @@ RUN chmod +x /tmp/download-ffmpeg.sh
 RUN /tmp/download-ffmpeg.sh
 
 # Final minimal image
-FROM busybox:latest
+FROM docker-private.private.krystof.io/busybox:stable
 
 # Copy downloaded artifacts
 COPY --from=downloader /utilities /utilities
