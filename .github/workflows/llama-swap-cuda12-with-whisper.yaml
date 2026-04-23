@@ -1,0 +1,149 @@
+name: Build llama-swap-cuda12-with-whisper image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Dockerfiles/llama-swap-cuda12-with-whisper/**'
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: arc-runners-basic
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate image tag
+        id: tag
+        run: |
+          IMAGE_TAG=$(git rev-parse --short HEAD)
+          echo "tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Using image tag: $IMAGE_TAG"
+
+      - name: Login to internal private docker repo
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef #v3.6.0
+        with:
+          registry: ${{ vars.IMAGE_REGISTRY_HOST }}
+          username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+
+      - name: Build and push Docker image
+        id: build
+        run: |
+          IMAGE_TAG="${{ steps.tag.outputs.tag }}"
+          REPO="${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/llama-swap-cuda12-with-whisper"
+          IMAGE_NAME="${REPO}:${IMAGE_TAG}"
+          LATEST_IMAGE="${REPO}:latest"
+
+          CUDA_VERSION="12.8.1"
+
+          echo "Building image: ${IMAGE_NAME} (CUDA ${CUDA_VERSION})"
+
+          cd Dockerfiles/llama-swap-cuda12-with-whisper
+
+          echo "::group::Docker Build"
+          docker build \
+            --progress=plain \
+            --build-arg CUDA_VERSION="${CUDA_VERSION}" \
+            -t "${IMAGE_NAME}" \
+            . 2>&1 | tee ../build.log
+          BUILD_EXIT_CODE=${PIPESTATUS[0]}
+          echo "::endgroup::"
+
+          if [ $BUILD_EXIT_CODE -ne 0 ]; then
+            echo "❌ Docker build failed with exit code $BUILD_EXIT_CODE"
+            exit $BUILD_EXIT_CODE
+          fi
+
+          IMAGE_SIZE=$(docker images --format "table {{.Size}}" "${IMAGE_NAME}" | tail -1)
+          IMAGE_ID=$(docker images --format "{{.ID}}" "${IMAGE_NAME}")
+
+          echo "::group::Docker Push"
+          docker push "${IMAGE_NAME}" 2>&1 | tee ../push.log
+          PUSH_EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $PUSH_EXIT_CODE -eq 0 ]; then
+            docker tag "${IMAGE_NAME}" "${LATEST_IMAGE}"
+            docker push "${LATEST_IMAGE}"
+          fi
+          echo "::endgroup::"
+
+          if [ $PUSH_EXIT_CODE -ne 0 ]; then
+            echo "❌ Docker push failed with exit code $PUSH_EXIT_CODE"
+            exit $PUSH_EXIT_CODE
+          fi
+
+          echo "image_name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "latest_image=${LATEST_IMAGE}" >> $GITHUB_OUTPUT
+          echo "image_size=${IMAGE_SIZE}" >> $GITHUB_OUTPUT
+          echo "image_id=${IMAGE_ID}" >> $GITHUB_OUTPUT
+
+          echo "✅ Successfully built and pushed:"
+          echo "  - ${IMAGE_NAME} (${IMAGE_SIZE})"
+          echo "  - ${LATEST_IMAGE}"
+
+      - name: Generate build report
+        if: always()
+        run: |
+          REPORT_DIR="build-reports"
+          mkdir -p "$REPORT_DIR"
+
+          cat > "$REPORT_DIR/build-info.json" << EOF
+          {
+            "workflow": "${{ github.workflow }}",
+            "commit": "${{ github.sha }}",
+            "branch": "${{ github.ref_name }}",
+            "actor": "${{ github.actor }}",
+            "timestamp": "$(date -u '+%Y-%m-%dT%H:%M:%SZ')",
+            "image": {
+              "tag": "${{ steps.tag.outputs.tag }}",
+              "name": "${{ steps.build.outputs.image_name }}",
+              "latest": "${{ steps.build.outputs.latest_image }}",
+              "size": "${{ steps.build.outputs.image_size }}",
+              "id": "${{ steps.build.outputs.image_id }}"
+            },
+            "status": "${{ job.status }}"
+          }
+          EOF
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports-${{ steps.tag.outputs.tag }}
+          path: |
+            build-reports/
+            Dockerfiles/build.log
+            Dockerfiles/push.log
+          retention-days: 30
+
+      - name: Create Job Summary
+        if: always()
+        run: |
+          echo "# 🐳 llama-swap-cuda12-with-whisper Image Build" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ **Build completed successfully!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Built Images" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Image | Tag | Size |" >> $GITHUB_STEP_SUMMARY
+            echo "|-------|-----|------|" >> $GITHUB_STEP_SUMMARY
+            echo "| llama-swap-cuda12-with-whisper | \`${{ steps.tag.outputs.tag }}\` | ${{ steps.build.outputs.image_size }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| llama-swap-cuda12-with-whisper | \`latest\` | ${{ steps.build.outputs.image_size }} |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Pull Commands:**" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ steps.build.outputs.image_name }}" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ steps.build.outputs.latest_image }}" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Build failed!**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
+          fi
