@@ -35,13 +35,16 @@ jobs:
       - name: Build and push Docker image
         run: |
           IMAGE_TAG="${{ steps.tag.outputs.tag }}"
-          IMAGE_NAME="${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/postgres-17.6-with-vector:${IMAGE_TAG}"
-          LATEST_IMAGE="${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/postgres-17.6-with-vector:latest"
-          
+          PG_VERSION="17.6"
+          REPO="${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/postgres-17.6-with-vector"
+          IMAGE_NAME="${REPO}:${IMAGE_TAG}"
+          VERSION_IMAGE="${REPO}:${PG_VERSION}"
+          LATEST_IMAGE="${REPO}:latest"
+
           echo "Building image: ${IMAGE_NAME}"
 
           cd Dockerfiles/postgres-17.6-with-vector
-          
+
           # Build with detailed output
           echo "::group::Docker Build"
           docker build \
@@ -50,41 +53,46 @@ jobs:
             . 2>&1 | tee ../build.log
           BUILD_EXIT_CODE=${PIPESTATUS[0]}
           echo "::endgroup::"
-          
+
           if [ $BUILD_EXIT_CODE -ne 0 ]; then
             echo "❌ Docker build failed with exit code $BUILD_EXIT_CODE"
             exit $BUILD_EXIT_CODE
           fi
-          
+
           # Get image info
           IMAGE_SIZE=$(docker images --format "table {{.Size}}" "${IMAGE_NAME}" | tail -1)
           IMAGE_ID=$(docker images --format "{{.ID}}" "${IMAGE_NAME}")
-          
+
           echo "::group::Docker Push"
           # Push tagged image
           docker push "${IMAGE_NAME}" 2>&1 | tee ../push.log
           PUSH_EXIT_CODE=${PIPESTATUS[0]}
-          
+
           if [ $PUSH_EXIT_CODE -eq 0 ]; then
+            # Tag and push version tag (CNPG requires a parseable PG version)
+            docker tag "${IMAGE_NAME}" "${VERSION_IMAGE}"
+            docker push "${VERSION_IMAGE}"
             # Tag and push as latest
             docker tag "${IMAGE_NAME}" "${LATEST_IMAGE}"
             docker push "${LATEST_IMAGE}"
           fi
           echo "::endgroup::"
-          
+
           if [ $PUSH_EXIT_CODE -ne 0 ]; then
             echo "❌ Docker push failed with exit code $PUSH_EXIT_CODE"
             exit $PUSH_EXIT_CODE
           fi
-          
+
           # Output for next steps
           echo "image_name=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "version_image=${VERSION_IMAGE}" >> $GITHUB_OUTPUT
           echo "latest_image=${LATEST_IMAGE}" >> $GITHUB_OUTPUT
           echo "image_size=${IMAGE_SIZE}" >> $GITHUB_OUTPUT
           echo "image_id=${IMAGE_ID}" >> $GITHUB_OUTPUT
-          
+
           echo "✅ Successfully built and pushed:"
           echo "  - ${IMAGE_NAME} (${IMAGE_SIZE})"
+          echo "  - ${VERSION_IMAGE}"
           echo "  - ${LATEST_IMAGE}"
         id: build
 
