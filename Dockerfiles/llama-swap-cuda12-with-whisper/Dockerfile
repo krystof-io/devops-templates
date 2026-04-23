@@ -16,6 +16,7 @@ WORKDIR /whisper.cpp
 RUN cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
         -DGGML_CUDA=ON \
+        -DGGML_NATIVE=OFF \
         -DBUILD_SHARED_LIBS=OFF \
     && cmake --build build --config Release -t whisper-server -j$(nproc)
 
