@@ -1,6 +1,6 @@
 # Stage 1: Build whisper-server with CUDA support
 ARG CUDA_VERSION=12.8.1
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS builder
+FROM docker-proxy.private.krystof.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git cmake build-essential \
@@ -20,6 +20,6 @@ RUN cmake -B build \
     && cmake --build build --config Release -t whisper-server -j$(nproc)
 
 # Stage 2: Add whisper-server to the llama-swap CUDA image
-FROM ghcr.io/mostlygeek/llama-swap:cuda
+FROM ghcr-proxy.private.krystof.io/mostlygeek/llama-swap:cuda
 
 COPY --from=builder /whisper.cpp/build/bin/whisper-server /app/whisper-server
