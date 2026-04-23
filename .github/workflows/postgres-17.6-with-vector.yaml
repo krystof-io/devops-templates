@@ -118,6 +118,7 @@ jobs:
           |----------|-------|
           | **Image Tag** | \`${{ steps.tag.outputs.tag }}\` |
           | **Image Name** | \`${{ steps.build.outputs.image_name }}\` |
+          | **Version Tag** | \`${{ steps.build.outputs.version_image }}\` |
           | **Latest Tag** | \`${{ steps.build.outputs.latest_image }}\` |
           | **Image Size** | ${{ steps.build.outputs.image_size }} |
           | **Image ID** | \`${{ steps.build.outputs.image_id }}\` |
@@ -125,6 +126,7 @@ jobs:
           ## 🔗 Registry Links
           
           - [Tagged Image](${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/postgres-17.6-with-vector:${{ steps.tag.outputs.tag }})
+          - [Version Image](${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/postgres-17.6-with-vector:17.6)
           - [Latest Image](${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/postgres-17.6-with-vector:latest)
           
           ## 📋 Build Status
@@ -144,6 +146,7 @@ jobs:
             "image": {
               "tag": "${{ steps.tag.outputs.tag }}",
               "name": "${{ steps.build.outputs.image_name }}",
+              "version": "${{ steps.build.outputs.version_image }}",
               "latest": "${{ steps.build.outputs.latest_image }}",
               "size": "${{ steps.build.outputs.image_size }}",
               "id": "${{ steps.build.outputs.image_id }}"
@@ -180,6 +183,7 @@ jobs:
             echo "| Image | Tag | Size |" >> $GITHUB_STEP_SUMMARY
             echo "|-------|-----|------|" >> $GITHUB_STEP_SUMMARY
             echo "| postgres-17.6-with-vector | \`${{ steps.tag.outputs.tag }}\` | ${{ steps.build.outputs.image_size }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| postgres-17.6-with-vector | \`17.6\` | ${{ steps.build.outputs.image_size }} |" >> $GITHUB_STEP_SUMMARY
             echo "| postgres-17.6-with-vector | \`latest\` | ${{ steps.build.outputs.image_size }} |" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "## 🚀 Registry Information" >> $GITHUB_STEP_SUMMARY
@@ -189,6 +193,7 @@ jobs:
             echo "**Pull Commands:**" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
             echo "docker pull ${{ steps.build.outputs.image_name }}" >> $GITHUB_STEP_SUMMARY
+            echo "docker pull ${{ steps.build.outputs.version_image }}" >> $GITHUB_STEP_SUMMARY
             echo "docker pull ${{ steps.build.outputs.latest_image }}" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           else
