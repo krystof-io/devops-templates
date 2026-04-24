@@ -46,3 +46,17 @@ FROM ghcr-proxy.private.krystof.io/mostlygeek/llama-swap:cuda
 
 COPY --from=whisper-builder /whisper.cpp/build/bin/whisper-server /app/whisper-server
 COPY --from=sd-builder /stable-diffusion.cpp/build/bin/sd-server /app/sd-server
+
+# ── F5-TTS: Python + PyTorch + f5-tts package ──────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-venv ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /app/f5tts-venv
+
+RUN /app/f5tts-venv/bin/pip install --no-cache-dir \
+        torch torchaudio --extra-index-url https://download.pytorch.org/whl/cu128 \
+    && /app/f5tts-venv/bin/pip install --no-cache-dir \
+        f5-tts fastapi uvicorn[standard] soundfile
+
+COPY f5tts_server.py /app/f5tts_server.py
