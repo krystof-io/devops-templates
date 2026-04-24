@@ -1,11 +1,11 @@
-name: Build llama-swap-cuda12-with-whisper image
+name: Build llama-swap-cuda12-with-extras image
 
 on:
   push:
     branches:
       - main
     paths:
-      - 'Dockerfiles/llama-swap-cuda12-with-whisper/**'
+      - 'Dockerfiles/llama-swap-cuda12-with-extras/**'
   workflow_dispatch:
 
 jobs:
@@ -35,7 +35,7 @@ jobs:
         id: build
         run: |
           IMAGE_TAG="${{ steps.tag.outputs.tag }}"
-          REPO="${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/llama-swap-cuda12-with-whisper"
+          REPO="${{ vars.IMAGE_REGISTRY_HOST }}/krystof-io/llama-swap-cuda12-with-extras"
           IMAGE_NAME="${REPO}:${IMAGE_TAG}"
           LATEST_IMAGE="${REPO}:latest"
 
@@ -43,7 +43,7 @@ jobs:
 
           echo "Building image: ${IMAGE_NAME} (CUDA ${CUDA_VERSION})"
 
-          cd Dockerfiles/llama-swap-cuda12-with-whisper
+          cd Dockerfiles/llama-swap-cuda12-with-extras
 
           echo "::group::Docker Build"
           docker build \
@@ -124,7 +124,7 @@ jobs:
       - name: Create Job Summary
         if: always()
         run: |
-          echo "# 🐳 llama-swap-cuda12-with-whisper Image Build" >> $GITHUB_STEP_SUMMARY
+          echo "# 🐳 llama-swap-cuda12-with-extras Image Build" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "${{ job.status }}" == "success" ]; then
@@ -134,8 +134,8 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "| Image | Tag | Size |" >> $GITHUB_STEP_SUMMARY
             echo "|-------|-----|------|" >> $GITHUB_STEP_SUMMARY
-            echo "| llama-swap-cuda12-with-whisper | \`${{ steps.tag.outputs.tag }}\` | ${{ steps.build.outputs.image_size }} |" >> $GITHUB_STEP_SUMMARY
-            echo "| llama-swap-cuda12-with-whisper | \`latest\` | ${{ steps.build.outputs.image_size }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| llama-swap-cuda12-with-extras | \`${{ steps.tag.outputs.tag }}\` | ${{ steps.build.outputs.image_size }} |" >> $GITHUB_STEP_SUMMARY
+            echo "| llama-swap-cuda12-with-extras | \`latest\` | ${{ steps.build.outputs.image_size }} |" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Pull Commands:**" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
