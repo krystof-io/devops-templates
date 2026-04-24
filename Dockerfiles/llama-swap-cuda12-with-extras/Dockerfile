@@ -18,7 +18,7 @@ RUN cmake -B build \
         -DGGML_CUDA=ON \
         -DGGML_NATIVE=OFF \
         -DBUILD_SHARED_LIBS=OFF \
-    && cmake --build build --config Release -t whisper-server -j$(nproc)
+    && cmake --build build --config Release -t whisper-server -j8
 
 # Stage 2: Build sd-server (stable-diffusion.cpp) with CUDA support
 FROM docker-proxy.private.krystof.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu24.04 AS sd-builder
@@ -39,7 +39,7 @@ RUN cmake -B build \
         -DSD_CUDA=ON \
         -DGGML_NATIVE=OFF \
         -DSD_BUILD_EXAMPLES=ON \
-    && cmake --build build --config Release -t sd-server -j$(nproc)
+    && cmake --build build --config Release -t sd-server -j8
 
 # Stage 3: Combine into the llama-swap CUDA image
 FROM ghcr-proxy.private.krystof.io/mostlygeek/llama-swap:cuda
