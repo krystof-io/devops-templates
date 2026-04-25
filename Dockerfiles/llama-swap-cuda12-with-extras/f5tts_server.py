@@ -53,8 +53,7 @@ def list_voices():
     voices = []
     for f in sorted(os.listdir(voices_dir)):
         if f.lower().endswith(AUDIO_EXTENSIONS):
-            name = os.path.splitext(f)[0]
-            voices.append({"name": name, "file": f})
+            voices.append(os.path.splitext(f)[0])
     return {"voices": voices}
 
 
