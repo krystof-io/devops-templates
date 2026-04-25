@@ -89,17 +89,18 @@ def speech(req: SpeechRequest):
             )
         else:
             ref_audio_path = _resolve_voice(req.voice)
-            if not req.ref_text:
-                raise HTTPException(
-                    status_code=400,
-                    detail="ref_text is required for clone mode (transcript of the reference audio)",
-                )
-            wavs, sr = tts_model.generate_voice_clone(
+            ref_text = req.ref_text or _load_ref_text(ref_audio_path)
+            clone_kwargs = dict(
                 text=req.input,
                 language=req.language,
                 ref_audio=ref_audio_path,
-                ref_text=req.ref_text,
             )
+            if ref_text:
+                clone_kwargs["ref_text"] = ref_text
+            else:
+                clone_kwargs["x_vector_only_mode"] = True
+                logger.info("No ref_text available, using x_vector_only_mode (speaker embedding only)")
+            wavs, sr = tts_model.generate_voice_clone(**clone_kwargs)
     except HTTPException:
         raise
     except Exception as e:
@@ -115,6 +116,16 @@ def speech(req: SpeechRequest):
         media_type="audio/wav",
         headers={"Content-Disposition": 'attachment; filename="speech.wav"'},
     )
+
+
+def _load_ref_text(audio_path: str) -> str | None:
+    txt_path = os.path.splitext(audio_path)[0] + ".txt"
+    if os.path.isfile(txt_path):
+        text = open(txt_path).read().strip()
+        if text:
+            logger.info(f"Loaded ref_text from {txt_path}")
+            return text
+    return None
 
 
 def _resolve_voice(voice: str) -> str:

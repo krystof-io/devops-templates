@@ -70,3 +70,13 @@ RUN /app/qwen3tts-venv/bin/pip install --no-cache-dir \
         qwen-tts fastapi uvicorn[standard] soundfile
 
 COPY qwen3tts_server.py /app/qwen3tts_server.py
+
+# ── Dia TTS: separate venv (pins torch==2.6.0 + triton) ─────
+RUN python3 -m venv /app/dia-venv
+
+RUN /app/dia-venv/bin/pip install --no-cache-dir \
+        torch==2.6.0 torchaudio==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu126 \
+    && /app/dia-venv/bin/pip install --no-cache-dir \
+        "git+https://github.com/nari-labs/dia.git" fastapi uvicorn[standard] soundfile numpy
+
+COPY dia_server.py /app/dia_server.py
