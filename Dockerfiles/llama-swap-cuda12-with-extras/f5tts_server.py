@@ -36,11 +36,26 @@ class SpeechRequest(BaseModel):
     seed: int | None = None
 
 
+AUDIO_EXTENSIONS = (".wav", ".flac", ".mp3", ".ogg")
+
+
 @app.get("/health")
 def health():
     if tts_model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
     return {"status": "ok"}
+
+
+@app.get("/v1/audio/voices")
+def list_voices():
+    if voices_dir is None or not os.path.isdir(voices_dir):
+        return {"voices": []}
+    voices = []
+    for f in sorted(os.listdir(voices_dir)):
+        if f.lower().endswith(AUDIO_EXTENSIONS):
+            name = os.path.splitext(f)[0]
+            voices.append({"name": name, "file": f})
+    return {"voices": voices}
 
 
 @app.post("/v1/audio/speech")
@@ -90,13 +105,21 @@ def _resolve_voice(voice: str) -> str:
             detail=f"Voice '{voice}' is not an absolute path and --voices-dir is not set",
         )
 
-    if not voice.lower().endswith((".wav", ".flac", ".mp3", ".ogg")):
-        voice = voice + ".wav"
+    if voice.lower().endswith(AUDIO_EXTENSIONS):
+        path = os.path.join(voices_dir, voice)
+        if not os.path.isfile(path):
+            raise HTTPException(status_code=400, detail=f"Voice file not found: {path}")
+        return path
 
-    path = os.path.join(voices_dir, voice)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=400, detail=f"Voice file not found: {path}")
-    return path
+    for ext in AUDIO_EXTENSIONS:
+        path = os.path.join(voices_dir, voice + ext)
+        if os.path.isfile(path):
+            return path
+
+    raise HTTPException(
+        status_code=400,
+        detail=f"Voice '{voice}' not found in {voices_dir} (tried {', '.join(AUDIO_EXTENSIONS)})",
+    )
 
 
 def main():
