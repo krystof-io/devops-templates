@@ -49,7 +49,7 @@ COPY --from=sd-builder /stable-diffusion.cpp/build/bin/sd-server /app/sd-server
 
 # ── F5-TTS: Python + PyTorch + f5-tts package ──────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv ffmpeg \
+        python3 python3-pip python3-venv libpython3.12 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /app/f5tts-venv
