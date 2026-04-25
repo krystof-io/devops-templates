@@ -60,3 +60,13 @@ RUN /app/f5tts-venv/bin/pip install --no-cache-dir \
         f5-tts fastapi uvicorn[standard] soundfile
 
 COPY f5tts_server.py /app/f5tts_server.py
+
+# ── Qwen3-TTS: separate venv to avoid dependency conflicts ───
+RUN python3 -m venv /app/qwen3tts-venv
+
+RUN /app/qwen3tts-venv/bin/pip install --no-cache-dir \
+        torch torchaudio --extra-index-url https://download.pytorch.org/whl/cu128 \
+    && /app/qwen3tts-venv/bin/pip install --no-cache-dir \
+        qwen-tts fastapi uvicorn[standard] soundfile
+
+COPY qwen3tts_server.py /app/qwen3tts_server.py
