@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-FastAPI server wrapping Dia TTS (Nari Labs) for llama-swap integration.
+FastAPI server wrapping Chatterbox TTS (Resemble AI) for llama-swap integration.
 
 Features:
   - Voice cloning from reference audio files in --voices-dir
-  - Inline nonverbal tags: (laughs), (sighs), (gasps), (coughs), etc.
-  - Multi-speaker with [S1]/[S2] tags
+  - Emotion/expressiveness via exaggeration parameter (0.0-2.0)
+  - Pace control via cfg_weight (0.0=slow/deliberate, 1.0=fast)
 
 Usage:
-    python dia_server.py --port 5000 --voices-dir /models/tts-voices
+    python chatterbox_server.py --port 5000 --voices-dir /models/tts-voices
 """
 
 import argparse
@@ -17,32 +17,29 @@ import logging
 import os
 import time
 
-import numpy as np
 import soundfile as sf
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("dia_server")
+logger = logging.getLogger("chatterbox_server")
 
-app = FastAPI(title="Dia TTS Server")
+app = FastAPI(title="Chatterbox TTS Server")
 tts_model = None
 voices_dir = None
 
 AUDIO_EXTENSIONS = (".wav", ".flac", ".mp3", ".ogg")
-SAMPLE_RATE = 44100
 
 
 class SpeechRequest(BaseModel):
-    model: str = "dia"
+    model: str = "chatterbox"
     input: str
     voice: str = "default"
     response_format: str = "wav"
-    cfg_scale: float = Field(default=3.0, ge=1.0, le=10.0)
-    temperature: float = Field(default=1.2, ge=0.1, le=2.0)
-    top_p: float = Field(default=0.95, ge=0.1, le=1.0)
-    max_tokens: int = Field(default=12288, ge=1024, le=12288)
+    exaggeration: float = Field(default=0.5, ge=0.0, le=2.0)
+    cfg_weight: float = Field(default=0.5, ge=0.0, le=1.0)
+    temperature: float = Field(default=0.8, ge=0.1, le=2.0)
 
 
 @app.get("/health")
@@ -68,46 +65,28 @@ def speech(req: SpeechRequest):
     if tts_model is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    gen_text = req.input
-    audio_prompt = None
     ref_audio_path = _resolve_voice(req.voice)
-    if ref_audio_path:
-        ref_text = _load_ref_text(ref_audio_path)
-        if ref_text:
-            if not ref_text.startswith("[S1]") and not ref_text.startswith("[S2]"):
-                ref_text = "[S1] " + ref_text
-            # Strip leading [S1]/[S2] from gen_text — ref_text already sets the speaker
-            stripped = gen_text.lstrip()
-            if stripped.startswith("[S1] ") or stripped.startswith("[S2] "):
-                stripped = stripped[5:]
-            text = ref_text + " " + stripped
-        else:
-            text = gen_text if gen_text.startswith("[S") else "[S1] " + gen_text
-        audio_prompt = ref_audio_path
-    else:
-        text = gen_text if gen_text.startswith("[S") else "[S1] " + gen_text
 
-    logger.info(f"Generating with text={text!r}, audio_prompt={audio_prompt!r}")
+    logger.info(
+        f"Generating: voice={req.voice}, exaggeration={req.exaggeration}, "
+        f"cfg_weight={req.cfg_weight}, ref={ref_audio_path}"
+    )
 
     try:
-        audio = tts_model.generate(
-            text=text,
-            audio_prompt=audio_prompt,
-            max_tokens=req.max_tokens,
-            cfg_scale=req.cfg_scale,
+        wav = tts_model.generate(
+            text=req.input,
+            audio_prompt_path=ref_audio_path,
+            exaggeration=req.exaggeration,
+            cfg_weight=req.cfg_weight,
             temperature=req.temperature,
-            top_p=req.top_p,
-            verbose=True,
         )
     except Exception as e:
-        logger.exception("Dia inference failed")
+        logger.exception("Chatterbox inference failed")
         raise HTTPException(status_code=500, detail=f"Inference failed: {e}")
 
-    if isinstance(audio, list):
-        audio = audio[0]
-
+    audio_np = wav.squeeze(0).cpu().numpy()
     buf = io.BytesIO()
-    sf.write(buf, audio, SAMPLE_RATE, format="WAV")
+    sf.write(buf, audio_np, tts_model.sr, format="WAV")
     buf.seek(0)
 
     return Response(
@@ -117,41 +96,29 @@ def speech(req: SpeechRequest):
     )
 
 
-def _load_ref_text(audio_path: str) -> str | None:
-    txt_path = os.path.splitext(audio_path)[0] + ".txt"
-    if os.path.isfile(txt_path):
-        text = open(txt_path).read().strip()
-        if text:
-            logger.info(f"Loaded ref_text from {txt_path}")
-            return text
-    return None
-
-
 def _resolve_voice(voice: str) -> str | None:
+    if voice == "default":
+        return None
     if os.path.isabs(voice) and os.path.isfile(voice):
         return voice
-
     if voices_dir is None:
         return None
-
     if voice.lower().endswith(AUDIO_EXTENSIONS):
         path = os.path.join(voices_dir, voice)
         if os.path.isfile(path):
             return path
         return None
-
     for ext in AUDIO_EXTENSIONS:
         path = os.path.join(voices_dir, voice + ext)
         if os.path.isfile(path):
             return path
-
     return None
 
 
 def main():
     global tts_model, voices_dir
 
-    parser = argparse.ArgumentParser(description="Dia TTS FastAPI server")
+    parser = argparse.ArgumentParser(description="Chatterbox TTS FastAPI server")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--voices-dir", type=str, default="/models/tts-voices")
@@ -159,15 +126,12 @@ def main():
 
     voices_dir = args.voices_dir
 
-    logger.info("Loading Dia model...")
+    logger.info("Loading Chatterbox model...")
     start = time.time()
-    from dia.model import Dia
+    from chatterbox.tts import ChatterboxTTS
 
-    tts_model = Dia.from_pretrained(
-        "nari-labs/Dia-1.6B-0626",
-        compute_dtype="float16",
-    )
-    logger.info(f"Dia loaded in {time.time() - start:.1f}s")
+    tts_model = ChatterboxTTS.from_pretrained(device="cuda")
+    logger.info(f"Chatterbox loaded in {time.time() - start:.1f}s")
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

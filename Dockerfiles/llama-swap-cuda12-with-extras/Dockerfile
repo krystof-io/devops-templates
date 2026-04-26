@@ -49,7 +49,7 @@ COPY --from=sd-builder /stable-diffusion.cpp/build/bin/sd-server /app/sd-server
 
 # ── F5-TTS: Python + PyTorch + f5-tts package ──────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv libpython3.12 ffmpeg sox \
+        python3 python3-pip python3-venv libpython3.12 ffmpeg sox git \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /app/f5tts-venv
@@ -80,3 +80,28 @@ RUN /app/dia-venv/bin/pip install --no-cache-dir \
         "git+https://github.com/nari-labs/dia.git" fastapi uvicorn[standard] soundfile numpy
 
 COPY dia_server.py /app/dia_server.py
+
+# ── Chatterbox TTS: voice cloning + emotion (exaggeration) ──
+RUN python3 -m venv /app/chatterbox-venv
+
+RUN /app/chatterbox-venv/bin/pip install --no-cache-dir \
+        torch==2.6.0 torchaudio==2.6.0 --extra-index-url https://download.pytorch.org/whl/cu126 \
+    && /app/chatterbox-venv/bin/pip install --no-cache-dir \
+        chatterbox-tts fastapi uvicorn[standard] soundfile
+
+COPY chatterbox_server.py /app/chatterbox_server.py
+
+# ── CosyVoice 2: voice cloning + emotion instructions ───────
+RUN git clone --recursive --depth 1 https://github.com/FunAudioLLM/CosyVoice.git /app/cosyvoice-repo
+
+RUN python3 -m venv /app/cosyvoice-venv
+
+RUN /app/cosyvoice-venv/bin/pip install --no-cache-dir \
+        torch torchaudio --extra-index-url https://download.pytorch.org/whl/cu128 \
+    && /app/cosyvoice-venv/bin/pip install --no-cache-dir \
+        transformers onnxruntime-gpu conformer hyperpyyaml \
+        openai-whisper soundfile librosa inflect wetext \
+        huggingface_hub modelscope pynini==2.1.6 \
+        fastapi uvicorn[standard]
+
+COPY cosyvoice2_server.py /app/cosyvoice2_server.py
