@@ -2,12 +2,14 @@
 """
 FastAPI server wrapping Qwen3-TTS for llama-swap integration.
 
-Supports two modes:
+Supports three modes:
   - voice-design: describe a voice in natural language via the 'voice' field
+  - custom-voice: 9 preset speakers + emotion/style instructions
   - clone: clone from reference audio files in --voices-dir
 
 Usage:
     python qwen3tts_server.py --port 5000 --mode voice-design
+    python qwen3tts_server.py --port 5000 --mode custom-voice
     python qwen3tts_server.py --port 5000 --mode clone --voices-dir /models/tts-voices
 """
 
@@ -34,8 +36,14 @@ AUDIO_EXTENSIONS = (".wav", ".flac", ".mp3", ".ogg")
 
 MODEL_IDS = {
     "voice-design": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+    "custom-voice": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
     "clone": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
 }
+
+CUSTOM_VOICE_SPEAKERS = [
+    "Aiden", "Dylan", "Eric", "Ono_Anna", "Ryan",
+    "Serena", "Sohee", "Uncle_Fu", "Vivian",
+]
 
 
 class SpeechRequest(BaseModel):
@@ -45,6 +53,7 @@ class SpeechRequest(BaseModel):
     language: str = "English"
     response_format: str = "wav"
     ref_text: str | None = None
+    instruct: str | None = None
 
 
 @app.get("/health")
@@ -66,6 +75,8 @@ def list_voices():
             "An elderly gentleman with a slow, deliberate cadence.",
             "Speak in an incredulous tone with a hint of panic.",
         ]}
+    if server_mode == "custom-voice":
+        return {"voices": CUSTOM_VOICE_SPEAKERS}
     if voices_dir is None or not os.path.isdir(voices_dir):
         return {"voices": []}
     voices = []
@@ -87,6 +98,15 @@ def speech(req: SpeechRequest):
                 language=req.language,
                 instruct=req.voice,
             )
+        elif server_mode == "custom-voice":
+            kwargs = dict(
+                text=req.input,
+                language=req.language,
+                speaker=req.voice,
+            )
+            if req.instruct:
+                kwargs["instruct"] = req.instruct
+            wavs, sr = tts_model.generate_custom_voice(**kwargs)
         else:
             ref_audio_path = _resolve_voice(req.voice)
             ref_text = req.ref_text or _load_ref_text(ref_audio_path)
@@ -163,7 +183,7 @@ def main():
     parser = argparse.ArgumentParser(description="Qwen3-TTS FastAPI server")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--host", type=str, default="127.0.0.1")
-    parser.add_argument("--mode", type=str, choices=["voice-design", "clone"], required=True)
+    parser.add_argument("--mode", type=str, choices=["voice-design", "custom-voice", "clone"], required=True)
     parser.add_argument("--voices-dir", type=str, default="/models/tts-voices")
     args = parser.parse_args()
 

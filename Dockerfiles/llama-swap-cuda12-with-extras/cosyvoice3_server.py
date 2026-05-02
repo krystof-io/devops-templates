@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-FastAPI server wrapping CosyVoice 2 (Alibaba FunAudioLLM) for llama-swap integration.
+FastAPI server wrapping CosyVoice 3 (Alibaba FunAudioLLM) for llama-swap integration.
 
 Features:
   - Voice cloning from reference audio + transcript
   - Emotion/style control via text instructions ("instruct" field)
   - Combined clone + emotion in one generation (inference_instruct2)
-  - Inline tags: [laughter], [breath], <strong>emphasis</strong>
+  - Inline tags: [laughter], [breath], [quick_breath], [cough], [sigh],
+    <laughter>text</laughter>, <strong>emphasis</strong>
+  - ARPABET pronunciation control for English
 
 Usage:
-    python cosyvoice2_server.py --port 5000 --voices-dir /models/tts-voices
+    python cosyvoice3_server.py --port 5000 --voices-dir /models/tts-voices
 """
 
 import argparse
@@ -25,9 +27,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("cosyvoice2_server")
+logger = logging.getLogger("cosyvoice3_server")
 
-app = FastAPI(title="CosyVoice 2 Server")
+app = FastAPI(title="CosyVoice 3 Server")
 cosyvoice_model = None
 voices_dir = None
 sample_rate = 24000
@@ -36,7 +38,7 @@ AUDIO_EXTENSIONS = (".wav", ".flac", ".mp3", ".ogg")
 
 
 class SpeechRequest(BaseModel):
-    model: str = "cosyvoice2"
+    model: str = "cosyvoice3"
     input: str
     voice: str = "default"
     response_format: str = "wav"
@@ -72,6 +74,13 @@ def speech(req: SpeechRequest):
     if ref_audio_path is None:
         raise HTTPException(status_code=400, detail=f"Voice '{req.voice}' not found")
 
+    info = sf.info(ref_audio_path)
+    if info.duration < 1.0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Reference audio '{req.voice}' is too short ({info.duration:.2f}s). CosyVoice 3 needs at least 1 second.",
+        )
+
     instruct = req.instruct
 
     try:
@@ -101,7 +110,7 @@ def speech(req: SpeechRequest):
                     prompt_wav=ref_audio_path,
                     stream=False,
                     speed=req.speed,
-                ):
+                    ):
                     all_audio.append(result["tts_speech"])
             else:
                 logger.info(f"Generating (cross-lingual, no ref_text): voice={req.voice}")
@@ -110,7 +119,7 @@ def speech(req: SpeechRequest):
                     prompt_wav=ref_audio_path,
                     stream=False,
                     speed=req.speed,
-                ):
+                    ):
                     all_audio.append(result["tts_speech"])
 
         if not all_audio:
@@ -122,7 +131,7 @@ def speech(req: SpeechRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception("CosyVoice 2 inference failed")
+        logger.exception("CosyVoice 3 inference failed")
         raise HTTPException(status_code=500, detail=f"Inference failed: {e}")
 
     buf = io.BytesIO()
@@ -164,12 +173,12 @@ def _resolve_voice(voice: str) -> str | None:
 
 
 def _ensure_model_downloaded(model_dir: str):
-    if os.path.isfile(os.path.join(model_dir, "cosyvoice2.yaml")):
+    if os.path.isfile(os.path.join(model_dir, "cosyvoice3.yaml")):
         return
-    logger.info(f"Downloading CosyVoice2-0.5B to {model_dir}...")
+    logger.info(f"Downloading Fun-CosyVoice3-0.5B-2512 to {model_dir}...")
     from huggingface_hub import snapshot_download
 
-    snapshot_download("FunAudioLLM/CosyVoice2-0.5B", local_dir=model_dir)
+    snapshot_download("FunAudioLLM/Fun-CosyVoice3-0.5B-2512", local_dir=model_dir)
     logger.info("Download complete")
 
 
@@ -180,24 +189,24 @@ def main():
     sys.path.insert(0, repo_dir)
     sys.path.insert(0, os.path.join(repo_dir, "third_party", "Matcha-TTS"))
 
-    parser = argparse.ArgumentParser(description="CosyVoice 2 FastAPI server")
+    parser = argparse.ArgumentParser(description="CosyVoice 3 FastAPI server")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--voices-dir", type=str, default="/models/tts-voices")
-    parser.add_argument("--model-dir", type=str, default="/models/cosyvoice2")
+    parser.add_argument("--model-dir", type=str, default="/models/cosyvoice3")
     args = parser.parse_args()
 
     voices_dir = args.voices_dir
 
     _ensure_model_downloaded(args.model_dir)
 
-    logger.info("Loading CosyVoice 2 model...")
+    logger.info("Loading CosyVoice 3 model...")
     start = time.time()
     from cosyvoice.cli.cosyvoice import AutoModel
 
     cosyvoice_model = AutoModel(model_dir=args.model_dir, fp16=True)
     sample_rate = cosyvoice_model.sample_rate
-    logger.info(f"CosyVoice 2 loaded in {time.time() - start:.1f}s (sample_rate={sample_rate})")
+    logger.info(f"CosyVoice 3 loaded in {time.time() - start:.1f}s (sample_rate={sample_rate})")
 
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 

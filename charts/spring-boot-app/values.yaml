@@ -144,6 +144,21 @@ traefikIngressRoute:
         - name: "" # Will default to the service name if empty
           port:  # Will default to service.port if not specified
 
+# Additional Traefik IngressRoutes
+# Use when an app needs multiple IngressRoutes with different entrypoints, TLS certs, or hosts.
+# Common use case: exposing an app both internally and externally.
+additionalIngressRoutes: []
+  # - name: external                    # suffix appended to release name for the IngressRoute
+  #   entryPoints:
+  #     - websec-external
+  #   tls:
+  #     secretName: "star-krystof-io-tls"
+  #   match: Host(`app.krystof.io`)
+  #   priority:                          # optional Traefik route priority
+  #   middlewares:
+  #     - name: mw-default-https-headers
+  #       namespace: traefik
+
 resources:
   limits:
     cpu: 1000m

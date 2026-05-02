@@ -1,0 +1,39 @@
+{{- range .Values.additionalIngressRoutes }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "spring-boot-app.fullname" $ }}-{{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "spring-boot-app.labels" $ | nindent 4 }}
+spec:
+  entryPoints:
+    {{- range .entryPoints }}
+    - {{ . }}
+    {{- end }}
+  {{- if .tls }}
+  tls:
+    {{- if .tls.secretName }}
+    secretName: {{ .tls.secretName }}
+    {{- end }}
+  {{- end }}
+  routes:
+    - match: {{ .match }}
+      kind: Rule
+      {{- if .priority }}
+      priority: {{ .priority }}
+      {{- end }}
+      {{- if .middlewares }}
+      middlewares:
+        {{- range .middlewares }}
+        - name: {{ .name }}
+          {{- if .namespace }}
+          namespace: {{ .namespace }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      services:
+        - name: {{ include "spring-boot-app.fullname" $ }}
+          port: {{ $.Values.service.port }}
+{{- end }}

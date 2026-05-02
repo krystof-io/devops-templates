@@ -73,6 +73,12 @@ def speech(req: SpeechRequest):
     )
 
     try:
+        # Workaround: clear stale forward hooks that cause premature EOS on repeat calls
+        # See https://github.com/resemble-ai/chatterbox/issues/504
+        if hasattr(tts_model, "t3") and hasattr(tts_model.t3, "tfmr"):
+            for layer in tts_model.t3.tfmr.layers:
+                layer.self_attn._forward_hooks.clear()
+
         wav = tts_model.generate(
             text=req.input,
             audio_prompt_path=ref_audio_path,
@@ -128,6 +134,18 @@ def main():
 
     logger.info("Loading Chatterbox model...")
     start = time.time()
+
+    import perth
+
+    if perth.PerthImplicitWatermarker is None:
+        logger.warning("perth watermarker unavailable — disabling audio watermarking")
+
+        class _NoOpWatermarker:
+            def apply_watermark(self, wav, sample_rate=None):
+                return wav
+
+        perth.PerthImplicitWatermarker = _NoOpWatermarker
+
     from chatterbox.tts import ChatterboxTTS
 
     tts_model = ChatterboxTTS.from_pretrained(device="cuda")

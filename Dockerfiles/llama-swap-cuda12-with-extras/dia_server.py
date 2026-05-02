@@ -39,10 +39,15 @@ class SpeechRequest(BaseModel):
     input: str
     voice: str = "default"
     response_format: str = "wav"
-    cfg_scale: float = Field(default=3.0, ge=1.0, le=10.0)
-    temperature: float = Field(default=1.2, ge=0.1, le=2.0)
-    top_p: float = Field(default=0.95, ge=0.1, le=1.0)
+    cfg_scale: float | None = None
+    temperature: float | None = None
+    top_p: float | None = None
+    cfg_filter_top_k: int | None = None
     max_tokens: int = Field(default=12288, ge=1024, le=12288)
+
+
+DEFAULTS_PLAIN = {"cfg_scale": 3.0, "temperature": 1.3, "top_p": 0.95, "cfg_filter_top_k": 35}
+DEFAULTS_CLONE = {"cfg_scale": 4.0, "temperature": 1.8, "top_p": 0.90, "cfg_filter_top_k": 50}
 
 
 @app.get("/health")
@@ -76,35 +81,45 @@ def speech(req: SpeechRequest):
         if ref_text:
             if not ref_text.startswith("[S1]") and not ref_text.startswith("[S2]"):
                 ref_text = "[S1] " + ref_text
-            # Strip leading [S1]/[S2] from gen_text — ref_text already sets the speaker
-            stripped = gen_text.lstrip()
-            if stripped.startswith("[S1] ") or stripped.startswith("[S2] "):
-                stripped = stripped[5:]
-            text = ref_text + " " + stripped
+            text = ref_text + " " + gen_text
         else:
             text = gen_text if gen_text.startswith("[S") else "[S1] " + gen_text
         audio_prompt = ref_audio_path
     else:
         text = gen_text if gen_text.startswith("[S") else "[S1] " + gen_text
 
-    logger.info(f"Generating with text={text!r}, audio_prompt={audio_prompt!r}")
+    defaults = DEFAULTS_CLONE if audio_prompt else DEFAULTS_PLAIN
+    cfg_scale = req.cfg_scale if req.cfg_scale is not None else defaults["cfg_scale"]
+    temperature = req.temperature if req.temperature is not None else defaults["temperature"]
+    top_p = req.top_p if req.top_p is not None else defaults["top_p"]
+    cfg_filter_top_k = req.cfg_filter_top_k if req.cfg_filter_top_k is not None else defaults["cfg_filter_top_k"]
+
+    logger.info(
+        f"Generating: text={text!r}, audio_prompt={audio_prompt!r}, "
+        f"cfg_scale={cfg_scale}, temperature={temperature}, top_p={top_p}, cfg_filter_top_k={cfg_filter_top_k}"
+    )
 
     try:
         audio = tts_model.generate(
             text=text,
             audio_prompt=audio_prompt,
             max_tokens=req.max_tokens,
-            cfg_scale=req.cfg_scale,
-            temperature=req.temperature,
-            top_p=req.top_p,
+            cfg_scale=cfg_scale,
+            temperature=temperature,
+            top_p=top_p,
+            cfg_filter_top_k=cfg_filter_top_k,
             verbose=True,
         )
     except Exception as e:
         logger.exception("Dia inference failed")
         raise HTTPException(status_code=500, detail=f"Inference failed: {e}")
 
+    if audio is None:
+        raise HTTPException(status_code=500, detail="No audio generated")
     if isinstance(audio, list):
         audio = audio[0]
+    if isinstance(audio, np.ndarray) and audio.size == 0:
+        raise HTTPException(status_code=500, detail="Generated audio is empty")
 
     buf = io.BytesIO()
     sf.write(buf, audio, SAMPLE_RATE, format="WAV")
