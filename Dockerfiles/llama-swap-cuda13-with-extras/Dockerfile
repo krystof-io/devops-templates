@@ -123,13 +123,16 @@ RUN git clone --recursive --depth 1 --branch ${SD_CPP_VERSION} \
 
 WORKDIR /stable-diffusion.cpp
 
+# Build both targets: sd-server (runtime HTTP server) AND sd (CLI). The CLI's
+# `-M convert` is used to bake/quantize models into GGUF — e.g. requantizing the
+# Lightning-merged Qwen-Image checkpoints to Q8_0 for the always-on fast variants.
 RUN cmake -B build \
         -DCMAKE_BUILD_TYPE=Release \
         -DSD_CUDA=ON \
         -DGGML_NATIVE=OFF \
         -DSD_BUILD_EXAMPLES=ON \
         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" \
-    && cmake --build build --config Release -t sd-server -j$(( ($(nproc) + 1) / 2 ))
+    && cmake --build build --config Release -t sd-server -t sd -j$(( ($(nproc) + 1) / 2 ))
 
 # ─────────────────────────────────────────────────────────────────
 # Stage 4: Runtime image — CUDA 13.2 runtime + llama-swap + extras
@@ -154,6 +157,7 @@ COPY --from=llama-builder /artifacts/ /app/
 # ── whisper.cpp + stable-diffusion.cpp servers ────────────────────
 COPY --from=whisper-builder /whisper.cpp/build/bin/whisper-server /app/whisper-server
 COPY --from=sd-builder /stable-diffusion.cpp/build/bin/sd-server /app/sd-server
+COPY --from=sd-builder /stable-diffusion.cpp/build/bin/sd /app/sd
 
 # ── llama-swap (Go binary) from GitHub releases ───────────────────
 RUN set -eux; \
