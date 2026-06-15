@@ -132,7 +132,7 @@ RUN cmake -B build \
         -DGGML_NATIVE=OFF \
         -DSD_BUILD_EXAMPLES=ON \
         -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCH}" \
-    && cmake --build build --config Release -t sd-server -t sd -j$(( ($(nproc) + 1) / 2 ))
+    && cmake --build build --config Release -t sd-server -t sd-cli -j$(( ($(nproc) + 1) / 2 ))
 
 # ─────────────────────────────────────────────────────────────────
 # Stage 4: Runtime image — CUDA 13.2 runtime + llama-swap + extras
@@ -157,7 +157,7 @@ COPY --from=llama-builder /artifacts/ /app/
 # ── whisper.cpp + stable-diffusion.cpp servers ────────────────────
 COPY --from=whisper-builder /whisper.cpp/build/bin/whisper-server /app/whisper-server
 COPY --from=sd-builder /stable-diffusion.cpp/build/bin/sd-server /app/sd-server
-COPY --from=sd-builder /stable-diffusion.cpp/build/bin/sd /app/sd
+COPY --from=sd-builder /stable-diffusion.cpp/build/bin/sd-cli /app/sd
 
 # ── llama-swap (Go binary) from GitHub releases ───────────────────
 RUN set -eux; \
