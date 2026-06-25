@@ -33,7 +33,8 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir -r requirements.txt
 
 # SageAttention 2 — built from source for target GPU arch
-ARG CUDA_ARCHITECTURES="8.9"
+# 12.0 = RTX PRO 5000 Blackwell (sm_120); 8.9 = Ada (RTX 4070 Ti Super)
+ARG CUDA_ARCHITECTURES="12.0"
 ENV TORCH_CUDA_ARCH_LIST="${CUDA_ARCHITECTURES}"
 ENV FORCE_CUDA="1"
 ENV MAX_JOBS="8"
