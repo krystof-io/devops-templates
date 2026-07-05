@@ -1,3 +1,4 @@
 Dockerfiles/llama-swap-cuda12-with-extras/.env
 Dockerfiles/wan2gp/.env
 Dockerfiles/llama-swap-cuda13-with-extras/.env
+Dockerfiles/llama-swap-branch-cuda13-with-extras/.env

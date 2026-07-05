@@ -1,0 +1,24 @@
+# Default llama-swap config baked into the image so the entrypoint has
+# something to start with. In the cluster this is meant to be OVERRIDDEN by
+# mounting your real config at /app/config.yaml.
+#
+# Bundled binaries (all on PATH, under /app):
+#   /app/llama-server    llama.cpp server   (CUDA 13.2)
+#   /app/whisper-server  whisper.cpp        (CUDA 13.2)
+#   /app/sd-server       stable-diffusion   (CUDA 13.2)
+#   /app/qwen3tts-venv/bin/python /app/qwen3tts_server.py   Qwen3-TTS
+#   /app/orpheus-venv/bin/python  /app/orpheus_server.py    Orpheus TTS
+#
+# See https://github.com/mostlygeek/llama-swap for the full config schema.
+
+healthCheckTimeout: 120
+
+models:
+  # Example placeholder — replace with your real model definitions.
+  "example":
+    cmd: |
+      /app/llama-server
+      --model /models/your-model.gguf
+      --port ${PORT}
+      --host 0.0.0.0
+      -ngl 99
