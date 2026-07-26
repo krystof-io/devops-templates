@@ -69,19 +69,37 @@ RUN pip install --no-cache-dir -r requirements.txt
 ARG CUDA_ARCHITECTURES="12.0"
 ENV TORCH_CUDA_ARCH_LIST="${CUDA_ARCHITECTURES}"
 ENV FORCE_CUDA="1"
-# sm_120 kernels are memory-hungry (~4GB/job); lower this on small builders
-ARG MAX_JOBS=8
+
+# Build parallelism is capped as a precaution against OOM on a shared machine.
+# SageAttention's setup.py feeds MAX_JOBS into *two* levels at once: distutils
+# `parallel` across the 3 extension modules, and ninja's job count within each.
+# MAX_JOBS=8 was measured at ~9 concurrent nvcc and a ~25GB peak — fine on a
+# dedicated builder, tight on a workstation. EXT_PARALLEL=1 serializes the
+# modules so MAX_JOBS is the only knob. Budget ~3GB per job; raise for speed.
+ARG MAX_JOBS=4
 ENV MAX_JOBS="${MAX_JOBS}"
+ARG EXT_PARALLEL=1
+ENV EXT_PARALLEL="${EXT_PARALLEL}"
 
 # setuptools must be <=75.8.2 for the SageAttention build (upstream instruction)
 RUN pip install --no-cache-dir --force-reinstall "setuptools<=75.8.2" \
     && git clone --branch v2.2.0 --depth 1 https://github.com/thu-ml/SageAttention.git /tmp/sageattention \
     && cd /tmp/sageattention \
     && pip install --no-cache-dir --no-build-isolation . \
+    # `cd /` before the rm is load-bearing: deleting the shell's own working
+    # directory leaves every later command with a CWD that no longer exists, and
+    # MKL's loader calls getcwd() when resolving the library it dlopen()s. That
+    # fails with ENOENT and torch dies with the very misleading
+    #   Intel oneMKL FATAL ERROR: Cannot load .../libtorch_cpu.so
+    # even though the file is intact and SageAttention built fine.
+    && cd / \
     && rm -rf /tmp/sageattention \
-    # fail the build rather than ship an image whose SageAttention has no kernel
-    # for the requested arch (setup.py emits an empty gencode list on a typo)
-    && python -c "import sageattention, sageattention._qattn_sm80"
+    # Fail the build rather than ship an image whose SageAttention has no kernel
+    # for the requested arch (setup.py emits an empty gencode list on a typo).
+    # _qattn_sm80/_fused are built for every supported arch — the sm80/sm89 in
+    # the module names is the kernel source family, not the target GPU: on a
+    # 12.0-only build these are compiled with arch=compute_120,code=sm_120.
+    && python -c "import sageattention, sageattention._qattn_sm80, sageattention._fused"
 
 # Non-root user (UID 1000 matches K8s fsGroup)
 RUN useradd -u 1000 -ms /bin/bash user \
