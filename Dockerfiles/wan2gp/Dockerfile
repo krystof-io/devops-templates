@@ -1,10 +1,10 @@
 # Wan2GP — Video Generator for the GPU Poor
 # https://github.com/deepbeepmeep/Wan2GP
 #
-ARG CUDA_VERSION=12.8.1
+ARG CUDA_VERSION=13.2.1
 FROM docker-proxy.private.krystof.io/nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu22.04
 
-ARG WAN2GP_COMMIT=79f82257bc33a11f08e53c881dbc7598c9c57f98
+ARG WAN2GP_COMMIT=70e194459e8d9dc39a1820a120d13d8e3ba123ef
 
 ENV DEBIAN_FRONTEND=noninteractive
 

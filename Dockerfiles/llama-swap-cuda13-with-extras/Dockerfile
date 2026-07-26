@@ -33,7 +33,7 @@ ARG UBUNTU_VERSION=24.04
 #   120 = Blackwell      — RTX 50-series (incoming GPU)
 # Building both makes one fatbinary that runs on either card. Drop to a single
 # arch to shrink the image / speed the build once a GPU is retired.
-ARG CUDA_ARCH=89;120
+ARG CUDA_ARCH=120
 
 # ─────────────────────────────────────────────────────────────────
 # Stage 1: Build llama.cpp (llama-server + ggml CUDA backends) from source
@@ -41,7 +41,7 @@ ARG CUDA_ARCH=89;120
 FROM docker-proxy.private.krystof.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS llama-builder
 
 ARG CUDA_ARCH
-ARG LLAMA_CPP_VERSION=b9873
+ARG LLAMA_CPP_VERSION=b10067
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-14 g++-14 build-essential cmake git python3 python3-pip \
