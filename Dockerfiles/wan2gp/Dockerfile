@@ -1,17 +1,47 @@
 # Wan2GP — Video Generator for the GPU Poor
 # https://github.com/deepbeepmeep/Wan2GP
 #
-ARG CUDA_VERSION=13.2.1
+# Toolchain per upstream docs/INSTALLATION.md (RTX 20xx-50xx):
+#   Python 3.11 · PyTorch 2.10.0 · CUDA 13 (cu130 wheels) · SageAttention 2.2.0
+#
+# Base supplies nvcc for the SageAttention build. Any CUDA 13.x works with the
+# cu130 wheels — torch only errors on a *major* version mismatch (a minor skew
+# just logs a warning), and CUDA minor version compatibility covers the runtime.
+# 13.1 is what upstream's install table pairs with the cu130 wheel index.
+ARG CUDA_VERSION=13.1.2
 FROM docker-proxy.private.krystof.io/nvidia/cuda:${CUDA_VERSION}-cudnn-devel-ubuntu22.04
 
 ARG WAN2GP_COMMIT=70e194459e8d9dc39a1820a120d13d8e3ba123ef
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Ubuntu 22.04 ships Python 3.10, but requirements.txt gates the CUDA-13 build of
+# onnxruntime-gpu behind `python_version >= "3.11"` — on 3.10 you get the CUDA-12
+# build and ONNX inference breaks. deadsnakes provides 3.11 on jammy.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-dev git wget curl cmake ninja-build \
-        libgl1 libglib2.0-0 ffmpeg \
+        software-properties-common gnupg ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-dev python3.11-venv \
+        git wget curl cmake ninja-build build-essential \
+        libgl1 libglib2.0-0 libsndfile1 libportaudio2 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
+
+# Isolated venv so the system python3.10 (used by apt tooling) stays untouched
+RUN python3.11 -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+ENV VIRTUAL_ENV=/opt/venv
+
+RUN pip install --no-cache-dir --upgrade pip wheel packaging ninja
+
+# PyTorch first so this layer survives WAN2GP_COMMIT bumps.
+# cu130 wheels bundle their own CUDA runtime; the base image supplies nvcc.
+# torch pulls in pytorch-triton, which SageAttention and torch.compile require.
+RUN pip install --no-cache-dir \
+        torch==2.10.0 \
+        torchvision==0.25.0 \
+        torchaudio==2.10.0 \
+        --index-url https://download.pytorch.org/whl/cu130
 
 WORKDIR /workspace
 
@@ -21,28 +51,37 @@ RUN git clone https://github.com/deepbeepmeep/Wan2GP.git /workspace \
     && git checkout ${WAN2GP_COMMIT} \
     && rm -rf .git
 
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
-
-# PyTorch — must match the CUDA version in the base image
-RUN pip install --no-cache-dir \
-        torch==2.10.0+cu128 \
-        torchvision==0.25.0+cu128 \
-        torchaudio==2.10.0+cu128 \
-        --index-url https://download.pytorch.org/whl/cu128
-
+# requirements.txt carries its own --extra-index-url for the CUDA-13
+# onnxruntime nightly feed, so no extra flags are needed here.
 RUN pip install --no-cache-dir -r requirements.txt
 
-# SageAttention 2 — built from source for target GPU arch
-# 12.0 = RTX PRO 5000 Blackwell (sm_120); 8.9 = Ada (RTX 4070 Ti Super)
+# SageAttention 2 — built from source for the target GPU arch.
+#
+# CUDA_ARCHITECTURES must be ';'-separated: SageAttention's setup.py splits
+# TORCH_CUDA_ARCH_LIST on ','/';' only, so a space-separated "8.9 12.0" is read
+# as one token, matches startswith("8.9"), and silently drops sm_120.
+#   12.0 = Blackwell  (RTX PRO 5000, RTX 50xx)  -> requires CUDA >= 12.8
+#    8.9 = Ada        (RTX 4070 Ti Super, 40xx) -> requires CUDA >= 12.4
+#    8.6 = Ampere     (RTX 30xx)
+# Only 8.0/8.6/8.9/9.0/12.0 are supported by SageAttention 2; sm_75 and below
+# are also dropped by CUDA 13 itself. List only what you deploy on — each arch
+# roughly doubles build time.
 ARG CUDA_ARCHITECTURES="12.0"
 ENV TORCH_CUDA_ARCH_LIST="${CUDA_ARCHITECTURES}"
 ENV FORCE_CUDA="1"
-ENV MAX_JOBS="8"
+# sm_120 kernels are memory-hungry (~4GB/job); lower this on small builders
+ARG MAX_JOBS=8
+ENV MAX_JOBS="${MAX_JOBS}"
 
-RUN git clone --branch v2.2.0 --depth 1 https://github.com/thu-ml/SageAttention.git /tmp/sageattention \
+# setuptools must be <=75.8.2 for the SageAttention build (upstream instruction)
+RUN pip install --no-cache-dir --force-reinstall "setuptools<=75.8.2" \
+    && git clone --branch v2.2.0 --depth 1 https://github.com/thu-ml/SageAttention.git /tmp/sageattention \
     && cd /tmp/sageattention \
     && pip install --no-cache-dir --no-build-isolation . \
-    && rm -rf /tmp/sageattention
+    && rm -rf /tmp/sageattention \
+    # fail the build rather than ship an image whose SageAttention has no kernel
+    # for the requested arch (setup.py emits an empty gencode list on a typo)
+    && python -c "import sageattention, sageattention._qattn_sm80"
 
 # Non-root user (UID 1000 matches K8s fsGroup)
 RUN useradd -u 1000 -ms /bin/bash user \
