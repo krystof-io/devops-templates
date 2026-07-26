@@ -114,6 +114,25 @@ ENV TORCH_ALLOW_TF32_CUBLAS=1
 ENV TORCH_ALLOW_TF32_CUDNN=1
 ENV SDL_AUDIODRIVER=dummy
 
+# Plugins installed at runtime through the WanGP Plugin Manager shell out to
+#   pip install -r <plugin>/requirements.txt          (shared/utils/plugins.py)
+# as UID 1000. /opt/venv is root-owned and lives in an image layer, so those
+# writes would both fail outright and be lost on restart. Redirect them to a
+# directory K8s backs with a PVC, and put it on sys.path with a .pth file —
+# .pth paths are *appended* by site.addsitedir, so a plugin dependency can
+# never shadow torch/numpy/opencv from the venv itself.
+#
+# PIP_TARGET must stay below every build-time pip install above, or it would
+# hijack them too. Note it also makes pip ignore already-installed packages:
+# a plugin listing a heavy dep re-downloads it here rather than reusing the
+# venv copy. Harmless (the venv copy still wins on import), just disk.
+ENV PLUGIN_SITE=/workspace/plugin-site
+ENV PIP_TARGET=${PLUGIN_SITE}
+ENV PIP_CACHE_DIR=/home/user/.cache/pip
+RUN mkdir -p ${PLUGIN_SITE} /home/user/.cache/pip \
+    && python -c "import sysconfig, pathlib, os; pathlib.Path(sysconfig.get_paths()['purelib'], 'zz-plugin-site.pth').write_text(os.environ['PLUGIN_SITE'] + chr(10))" \
+    && chown -R user:user ${PLUGIN_SITE} /home/user/.cache
+
 EXPOSE 7860
 
 USER user
