@@ -27,6 +27,45 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgl1 libglib2.0-0 libsndfile1 libportaudio2 ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
+# Jammy's apt ffmpeg is 4.4.2, which predates `-fps_mode` (added in ffmpeg 5.0).
+# WanGP's decoder passes that flag unconditionally
+# (shared/utils/video_decode.py, _decode_contiguous_video_frames_ffmpeg), so on
+# 4.4.2 *any* task with a `video_source` dies with
+#   Unrecognized option 'fps_mode'. Error splitting the argument list
+# That is every sliding-window continuation — video-extend, and the whole
+# boxart roundtrip pipeline. It fails at generation time, not validation, so a
+# --dry-run gate reports the queue as perfectly valid first.
+#
+# Overlay a static build ahead of it. /usr/local/bin precedes /usr/bin in PATH,
+# so this shadows the apt binaries for every consumer without removing them —
+# the apt package is still wanted for its codec libraries, which torchaudio and
+# opencv link against.
+#
+# Deliberately NOT dropped into /workspace/ffmpeg_bins, the directory WanGP
+# checks first (shared/ffmpeg_setup.py:118): an ffmpeg found there is treated as
+# a local install and _libs_present() (:139) then demands libavdevice.so*
+# beside it. A static binary has no such library, so WanGP concludes the install
+# is incomplete and re-downloads a 60 MB bundle on *every* invocation. Resolved
+# via PATH instead, it short-circuits to "system-installed" and skips that.
+# Setting $FFMPEG_BINARY does not work either — ffmpeg_setup.py:151 overwrites
+# it at import.
+#
+# The URL is a moving "latest release" pointer, so the version is asserted
+# rather than assumed: fail the build here rather than ship an image whose
+# continuation passes are silently broken.
+RUN curl -fsSL https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz \
+      | tar xJ -C /tmp \
+    && mv /tmp/ffmpeg-*-amd64-static/ffmpeg /tmp/ffmpeg-*-amd64-static/ffprobe /usr/local/bin/ \
+    && rm -rf /tmp/ffmpeg-*-amd64-static \
+    && chmod 0755 /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
+    && /usr/local/bin/ffmpeg -v error -f lavfi -i testsrc=d=0.1 \
+         -fps_mode passthrough -f null - \
+    && /usr/local/bin/ffprobe -version >/dev/null \
+    # and prove PATH resolves to the new one, not the apt 4.4.2 still present
+    && test "$(command -v ffmpeg)" = /usr/local/bin/ffmpeg \
+    && test "$(command -v ffprobe)" = /usr/local/bin/ffprobe \
+    && ffmpeg -version | head -1
+
 # Isolated venv so the system python3.10 (used by apt tooling) stays untouched
 RUN python3.11 -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
