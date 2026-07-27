@@ -1,4 +1,4 @@
-Dockerfiles/llama-swap-cuda12-with-extras/.env
-Dockerfiles/wan2gp/.env
-Dockerfiles/llama-swap-cuda13-with-extras/.env
-Dockerfiles/llama-swap-branch-cuda13-with-extras/.env
+# Build/push notes per image, including registry login details.
+# Globbed rather than enumerated: the previous per-directory list meant a new
+# Dockerfiles/<name>/.env was not ignored until someone remembered to add it.
+Dockerfiles/*/.env
