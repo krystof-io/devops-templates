@@ -41,7 +41,7 @@ ARG CUDA_ARCH=120
 FROM docker-proxy.private.krystof.io/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS llama-builder
 
 ARG CUDA_ARCH
-ARG LLAMA_CPP_VERSION=b10067
+ARG LLAMA_CPP_VERSION=b10434
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-14 g++-14 build-essential cmake git python3 python3-pip \
