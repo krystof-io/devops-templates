@@ -147,7 +147,7 @@ Once that lands, delete the symlink `RUN` from the Dockerfile.
 | CUDA | 13.2.1 | Driver 595.71.05 advertises 13.2 as its ceiling — not 13.3. sm_120 only needs ≥12.8, so this is parity, not a requirement. |
 | `CUDA_ARCH` | 120 | The entire point. Also *faster* to build than upstream's 5-arch default. |
 | llama-swap | v251 | Drives both the binary **and** the install scripts, so build logic and runtime always agree. |
-| llama.cpp | b10434 | **Required.** `--reasoning-effort` does not exist before it; on b10067 llama-server exited in ~800 ms with "upstream command exited prematurely". Upstream defaults to `master`. |
+| llama.cpp | b10595 | Bumped from b10434. That old pin was a floor, not a preference: `--reasoning-effort` does not exist before b10434, and on b10067 llama-server exited in ~800 ms with "upstream command exited prematurely". b10595 is well past it. Upstream's script defaults to `master`; we pin. |
 | whisper.cpp | v1.9.3 | Bumped from v1.8.6. |
 | stable-diffusion.cpp | `97d2990…` (full SHA) | Bumped from 90e87bc. Pinned by SHA because sd.cpp's `master-<N>-<hash>` tags aren't API-ordered. |
 | ik_llama.cpp | `8337e4cd…` (full SHA) | No release tags upstream; SHA is the only way to pin. |
