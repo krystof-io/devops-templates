@@ -151,7 +151,7 @@ Once that lands, delete the symlink `RUN` from the Dockerfile.
 | whisper.cpp | v1.9.3 | Bumped from v1.8.6. |
 | stable-diffusion.cpp | `97d2990…` (full SHA) | Bumped from 90e87bc. Pinned by SHA because sd.cpp's `master-<N>-<hash>` tags aren't API-ordered. |
 | ik_llama.cpp | `8337e4cd…` (full SHA) | No release tags upstream; SHA is the only way to pin. |
-| audio.cpp | `62735eaf…` (full SHA) | Same. |
+| audio.cpp | `62735eaf…` (full SHA) | Same. **Carries a local patch** — see `patches/`. Re-verify it when this pin moves. |
 | torch / torchaudio | 2.11.0 | Re-verified 2026-08-23: torch cu130 ships up to 2.13.0 but **torchaudio cu130 still tops out at 2.11.0**. They must match, so 2.11.0 is still the ceiling. |
 | qwen-tts, snac, fastapi, uvicorn, soundfile, requests, numpy | exact | Newly pinned — see below. |
 
@@ -193,6 +193,22 @@ Highest-risk items, in order:
 abbreviated one fails with `couldn't find remote ref`. sd.cpp is pinned the same way,
 because its auto-generated `master-<N>-<hash>` tags aren't returned in chronological
 order by the API and are genuinely hard to order by eye.
+
+## Local patches
+
+`patches/` holds diffs applied on top of the pinned `audio.cpp` commit, after
+upstream's build script has cloned and built it. `patches/README.md` documents
+each one: what it fixes, how to verify it took effect, and its upstream status.
+
+Currently one patch, `voxcpm2-streaming-seam.patch`, which stops VoxCPM2's
+streaming output clicking at every 0.16 s chunk boundary. Without it the
+streaming entry is unusable for anything a person listens to, and the workaround
+is a second llama-swap entry running the same model in offline mode.
+
+A patch that no longer applies **fails the build** rather than silently
+producing an unpatched binary. That is the intended behaviour after an
+`AUDIO_CPP_VERSION` bump: re-check whether upstream fixed it, then rebase or
+drop the patch.
 
 ## Build
 
@@ -258,3 +274,6 @@ yet. Leave the 5000 instance (broadcaster's backend) alone until the 6000 passes
 `qwen3tts_server.py`, `orpheus_server.py` and `config.example.yaml` are copies of the
 ones in `../llama-swap-cuda13-with-extras/`. Keep them in sync while both images
 exist; delete that directory once this one graduates.
+
+`patches/` is local to this image and has no counterpart there — see the
+section above.

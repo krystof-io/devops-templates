@@ -180,6 +180,40 @@ RUN --mount=type=cache,id=ccache-cuda13,target=/ccache \
     --mount=type=cache,id=audio-cuda13,target=/src/audio.cpp/build \
     BACKEND=cuda bash /build/install-audio.sh "${AUDIO_CPP_VERSION}"
 
+# ── Local patches on top of the pinned audio.cpp commit ──────────
+# See patches/README.md for what each one fixes and how to verify it.
+#
+# APPLIED AFTER the upstream build, not before, and that is deliberate:
+# install-audio.sh does the clone AND the build in one go, ending with
+# `git fetch --depth=1 origin <sha>; git checkout FETCH_HEAD`, which would
+# fight a working tree patched beforehand. Patching afterwards and rebuilding
+# reuses the cmake cache and ccache that the first build just populated, so
+# this recompiles ONE translation unit and relinks rather than rebuilding the
+# whole CUDA project. Both cache mounts must be repeated here or the build
+# directory from the previous step is not visible.
+#
+# `git apply --check` runs first so that a patch which no longer applies FAILS
+# THE BUILD LOUDLY. Without it a stale patch after an AUDIO_CPP_VERSION bump
+# would leave a silently unpatched binary in the image, and the symptom is
+# audio quality, which nothing else here would catch.
+#
+# Only audiocpp_server is rebuilt. audiocpp_cli links the same engine but is
+# not used by any llama-swap entry; if a patch ever needs to reach it, add it
+# to the --target list and copy it as well.
+COPY patches/voxcpm2-streaming-seam.patch /patches/
+RUN --mount=type=cache,id=ccache-cuda13,target=/ccache \
+    --mount=type=cache,id=audio-cuda13,target=/src/audio.cpp/build \
+    set -eux; \
+    cd /src/audio.cpp; \
+    for p in /patches/*.patch; do \
+        echo "=== applying $(basename "$p") ==="; \
+        git apply --check "$p"; \
+        git apply "$p"; \
+    done; \
+    cmake --build build --config Release -j"$(nproc)" --target audiocpp_server; \
+    cp build/bin/audiocpp_server /install/bin/; \
+    echo "=== patched audiocpp_server installed ==="
+
 # ─────────────────────────────────────────────────────────────────
 # Stage 5: ik_llama.cpp  (ik-llama-server — NEW)
 # ─────────────────────────────────────────────────────────────────
