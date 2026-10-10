@@ -57,36 +57,45 @@
 # this one passes. If it fails, bisect by reverting ARGs one at a time — the old
 # values are recorded below.
 #
-# llama.cpp:     b10434 -> b10595. The OLD pin was not arbitrary: `--reasoning-effort`
-#                does not exist before b10434 (on b10067 llama-server exited in ~800ms
-#                with "upstream command exited prematurely"). b10595 is far newer so
-#                the flag is present, but it is 161 builds of drift — this is the
-#                single most likely source of a behaviour change in this image.
-#                FIRST THING TO CHECK on any weirdness:
+# llama.cpp:     b10434 -> b10595 -> b11539. The ORIGINAL pin was not arbitrary:
+#                `--reasoning-effort` does not exist before b10434 (on b10067
+#                llama-server exited in ~800ms with "upstream command exited
+#                prematurely"). b11539 is ~950 builds past that floor — re-check
+#                `--reasoning-effort`/`--spec-type draft-mtp`/chat-template flags
+#                on the two 27B chat entries before trusting this blindly. FIRST
+#                THING TO CHECK on any weirdness:
 #                  /usr/local/bin/llama-server --help | grep reasoning
-# whisper.cpp:   v1.8.6 -> v1.9.3 (2026-08-20). Minor-version jump; watch for CLI flag
-#                changes in the two whisper-server entries.
-# sd.cpp:        90e87bc (2026-05-06) -> 97d2990 (2026-08-19), ~3.5 months of drift.
+# whisper.cpp:   v1.8.6 -> v1.9.3 -> v1.9.5. Patch-version bump; watch for CLI
+#                flag changes in the two whisper-server entries.
+# sd.cpp:        90e87bc (2026-05-06) -> 97d2990 (2026-08-19) -> f89d9b1
+#                (2026-10-09). Bumped specifically to pick up a LoKr LoRA fix —
+#                see patches/sdcpp-lokr-multidim-batch.patch below; the fix was
+#                NOT available at 97d2990 and still is not merged upstream, so
+#                a local patch rides on top of this pin too.
 #                Pinned by FULL COMMIT SHA, not a tag: sd.cpp's auto-generated
 #                master-<N>-<hash> / master-<hash> tags are not returned
 #                chronologically by the API and are genuinely hard to order. A full
 #                40-char SHA is unambiguous (git fetch --depth=1 needs the full SHA;
 #                an abbreviated one fails with "couldn't find remote ref").
-#                The old pin existed to keep sd-server's CLI byte-for-byte compatible
-#                with our 4 sd-server entries — RE-VERIFY those flags after this bump.
+#                RE-VERIFY the 4 sd-server entries' CLI flags after this bump.
 # ik_llama.cpp:  no release tags at all upstream, so `main` was the only option.
-#                Now pinned to the SHA main resolved to on 2026-08-23.
-# audio.cpp:     same — no tags. NOTE this project was created 2026-06-23 and is only
-#                ~2 months old, moving fast. Pinned by SHA for reproducibility.
+#                Re-pinned to the SHA main resolved to on 2026-10-09.
+# audio.cpp:     re-pinned to the SHA main resolved to on 2026-10-09. Upstream
+#                independently fixed the VoxCPM2 streaming-click bug this image
+#                used to carry a local patch for (commits a045e690a6 / 6c70f32d0d,
+#                2026-09-20 — same technique, a stream_left_context decode
+#                window defaulting to 3 patches) — the local
+#                voxcpm2-streaming-seam.patch is REMOVED as of this bump since
+#                it no longer applies cleanly and is no longer needed.
 ARG CUDA_VERSION=13.2.1
 ARG UBUNTU_VERSION=24.04
 ARG CUDA_ARCH=120
-ARG LLAMA_SWAP_VERSION=251
-ARG LLAMA_CPP_VERSION=b10595
-ARG WHISPER_CPP_VERSION=v1.9.3
-ARG SD_CPP_VERSION=97d2990807fe6d558e395f8764198d7c7e7b411c
-ARG IK_LLAMA_VERSION=8337e4cd3861406fc04e0854b1409cd1b027fbc9
-ARG AUDIO_CPP_VERSION=62735eafd96294c52d6c4607f5f38ac55be54f06
+ARG LLAMA_SWAP_VERSION=262
+ARG LLAMA_CPP_VERSION=b11539
+ARG WHISPER_CPP_VERSION=v1.9.5
+ARG SD_CPP_VERSION=f89d9b13d730eabeede7314ce49dacd18d3c90c2
+ARG IK_LLAMA_VERSION=5194a9e1451b885e24dd5a065f650864e8807c59
+ARG AUDIO_CPP_VERSION=715108a8efde4bb9831dd19771dc3a5efbbdc953
 
 # ── Python pins for the TTS venvs ────────────────────────────────
 # The old image pinned torch/torchaudio but left EVERYTHING else floating
@@ -118,10 +127,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 # ccache is NOT optional: upstream's scripts hardcode
 # -DCMAKE_C_COMPILER_LAUNCHER=ccache, so cmake fails outright without it.
 # The libav*-dev packages are what whisper.cpp needs for WHISPER_FFMPEG=yes.
+# libmp3lame-dev is a NEW requirement as of this bump's AUDIO_CPP_VERSION pin:
+# install-audio.sh now passes -DAUDIOCPP_SERVER_FRONTEND_MODULES=audio_decode;
+# mp3_encode, and the mp3_encode frontend's CMake find_package fails outright
+# (lame/lame.h + libmp3lame) without it — confirmed this is upstream's own
+# install script requiring it, not something papered over before.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-14 g++-14 build-essential cmake git python3 python3-pip \
         libssl-dev libgomp1 curl ca-certificates ccache make wget \
         pkg-config libavcodec-dev libavformat-dev libavutil-dev libswresample-dev \
+        libmp3lame-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # CUDA 13's supported host compiler is gcc-14; Ubuntu 24.04 defaults to gcc-13.
@@ -144,8 +159,9 @@ RUN set -eux; \
         https://github.com/mostlygeek/llama-swap.git /src/llama-swap-repo; \
     git -C /src/llama-swap-repo sparse-checkout set docker/unified; \
     cp /src/llama-swap-repo/docker/unified/install-*.sh /build/; \
+    cp /src/llama-swap-repo/docker/unified/lib-release.sh /build/; \
     cp /src/llama-swap-repo/docker/unified/audiocpp-server.example.json /build/; \
-    chmod +x /build/install-*.sh; \
+    chmod +x /build/install-*.sh /build/lib-release.sh; \
     ls -la /build/
 
 WORKDIR /build
@@ -168,6 +184,33 @@ RUN --mount=type=cache,id=ccache-cuda13,target=/ccache \
     --mount=type=cache,id=sd-cuda13,target=/src/stable-diffusion.cpp/build \
     BACKEND=cuda bash /build/install-sd.sh "${SD_CPP_VERSION}"
 
+# ── Local patch: LoKr multi-dim-batch fix (resurrected #1980) ────
+# See patches/README.md for the full writeup. Same apply-after-build pattern
+# as the audio-build stage below: install-sd.sh's own `git fetch --depth=1
+# origin <sha>; git checkout FETCH_HEAD` would fight a working tree patched
+# beforehand, and patching afterwards reuses the cmake cache + ccache the
+# first build just populated — this recompiles the one changed translation
+# unit and relinks rather than rebuilding the whole CUDA project. Both cache
+# mounts must be repeated here or the build directory isn't visible.
+#
+# `git apply --check` runs first so a patch that no longer applies FAILS THE
+# BUILD LOUDLY rather than silently shipping an unpatched binary — exactly
+# the same reasoning as the audio-build patch step.
+COPY patches/sdcpp-lokr-multidim-batch.patch /patches/
+RUN --mount=type=cache,id=ccache-cuda13,target=/ccache \
+    --mount=type=cache,id=sd-cuda13,target=/src/stable-diffusion.cpp/build \
+    set -eux; \
+    cd /src/stable-diffusion.cpp; \
+    for p in /patches/*.patch; do \
+        echo "=== applying $(basename "$p") ==="; \
+        git apply --check "$p"; \
+        git apply "$p"; \
+    done; \
+    cmake --build build --config Release -j"$(nproc)" --target sd-server sd-cli; \
+    cp build/bin/sd-server /install/bin/; \
+    cp build/bin/sd-cli /install/bin/; \
+    echo "=== patched sd-server/sd-cli installed ==="
+
 # ─────────────────────────────────────────────────────────────────
 # Stage 4: audio.cpp  (audiocpp_server — NEW, not in the old image)
 # ─────────────────────────────────────────────────────────────────
@@ -180,39 +223,16 @@ RUN --mount=type=cache,id=ccache-cuda13,target=/ccache \
     --mount=type=cache,id=audio-cuda13,target=/src/audio.cpp/build \
     BACKEND=cuda bash /build/install-audio.sh "${AUDIO_CPP_VERSION}"
 
-# ── Local patches on top of the pinned audio.cpp commit ──────────
-# See patches/README.md for what each one fixes and how to verify it.
-#
-# APPLIED AFTER the upstream build, not before, and that is deliberate:
-# install-audio.sh does the clone AND the build in one go, ending with
-# `git fetch --depth=1 origin <sha>; git checkout FETCH_HEAD`, which would
-# fight a working tree patched beforehand. Patching afterwards and rebuilding
-# reuses the cmake cache and ccache that the first build just populated, so
-# this recompiles ONE translation unit and relinks rather than rebuilding the
-# whole CUDA project. Both cache mounts must be repeated here or the build
-# directory from the previous step is not visible.
-#
-# `git apply --check` runs first so that a patch which no longer applies FAILS
-# THE BUILD LOUDLY. Without it a stale patch after an AUDIO_CPP_VERSION bump
-# would leave a silently unpatched binary in the image, and the symptom is
-# audio quality, which nothing else here would catch.
-#
-# Only audiocpp_server is rebuilt. audiocpp_cli links the same engine but is
-# not used by any llama-swap entry; if a patch ever needs to reach it, add it
-# to the --target list and copy it as well.
-COPY patches/voxcpm2-streaming-seam.patch /patches/
-RUN --mount=type=cache,id=ccache-cuda13,target=/ccache \
-    --mount=type=cache,id=audio-cuda13,target=/src/audio.cpp/build \
-    set -eux; \
-    cd /src/audio.cpp; \
-    for p in /patches/*.patch; do \
-        echo "=== applying $(basename "$p") ==="; \
-        git apply --check "$p"; \
-        git apply "$p"; \
-    done; \
-    cmake --build build --config Release -j"$(nproc)" --target audiocpp_server; \
-    cp build/bin/audiocpp_server /install/bin/; \
-    echo "=== patched audiocpp_server installed ==="
+# ── voxcpm2-streaming-seam.patch REMOVED as of AUDIO_CPP_VERSION
+# 715108a8efde4bb9831dd19771dc3a5efbbdc953 ──────────────────────
+# Upstream fixed the same bug independently (commits a045e690a6 / 6c70f32d0d,
+# 2026-09-20), using the same technique our local patch used: decode a window
+# of preceding patches as left context and trim them off again
+# (stream_left_context, default 3 — matching our kStreamingDecodeContextPatches).
+# Confirmed the old patch no longer applies cleanly against this pin
+# (`git apply --check` fails on session.cpp), which is exactly the expected
+# signal per patches/README.md to check whether upstream fixed it first — and
+# it had. No patch step needed for audio.cpp any more.
 
 # ─────────────────────────────────────────────────────────────────
 # Stage 5: ik_llama.cpp  (ik-llama-server — NEW)
@@ -248,9 +268,12 @@ RUN bash /build/install-llama-swap.sh "${LLAMA_SWAP_VERSION}"
 
 # vllm-wrapper is not in the release archives, so upstream compiles it from the
 # same revision as the binary. Needs Go, hence a separate base.
-FROM docker-proxy.private.krystof.io/golang:1.26-bookworm AS vllm-wrapper-build
+# go1.26 was sufficient at the original pin; v262's go.mod now requires >=1.27.1
+# (go: go.mod requires go >= 1.27.1 (running go 1.26.9; GOTOOLCHAIN=local)) — bumped
+# to the exact current patch release rather than a floating minor tag.
+FROM docker-proxy.private.krystof.io/golang:1.27.2-bookworm AS vllm-wrapper-build
 ARG LLAMA_SWAP_VERSION
-COPY --from=builder-base /build/install-vllm-wrapper.sh /build/
+COPY --from=builder-base /build/install-vllm-wrapper.sh /build/lib-release.sh /build/
 RUN --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     bash /build/install-vllm-wrapper.sh "${LLAMA_SWAP_VERSION}"
@@ -270,6 +293,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip python3-venv python3-dev libpython3.12 \
         python3-numpy python3-sentencepiece \
         libavcodec60 libavformat60 libavutil58 libswresample4 \
+        libmp3lame0 \
         build-essential \
     && rm -rf /var/lib/apt/lists/*
 

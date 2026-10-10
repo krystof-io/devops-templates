@@ -146,12 +146,12 @@ Once that lands, delete the symlink `RUN` from the Dockerfile.
 |---|---|---|
 | CUDA | 13.2.1 | Driver 595.71.05 advertises 13.2 as its ceiling — not 13.3. sm_120 only needs ≥12.8, so this is parity, not a requirement. |
 | `CUDA_ARCH` | 120 | The entire point. Also *faster* to build than upstream's 5-arch default. |
-| llama-swap | v251 | Drives both the binary **and** the install scripts, so build logic and runtime always agree. |
-| llama.cpp | b10595 | Bumped from b10434. That old pin was a floor, not a preference: `--reasoning-effort` does not exist before b10434, and on b10067 llama-server exited in ~800 ms with "upstream command exited prematurely". b10595 is well past it. Upstream's script defaults to `master`; we pin. |
-| whisper.cpp | v1.9.3 | Bumped from v1.8.6. |
-| stable-diffusion.cpp | `97d2990…` (full SHA) | Bumped from 90e87bc. Pinned by SHA because sd.cpp's `master-<N>-<hash>` tags aren't API-ordered. |
-| ik_llama.cpp | `8337e4cd…` (full SHA) | No release tags upstream; SHA is the only way to pin. |
-| audio.cpp | `62735eaf…` (full SHA) | Same. **Carries a local patch** — see `patches/`. Re-verify it when this pin moves. |
+| llama-swap | v262 | Drives both the binary **and** the install scripts, so build logic and runtime always agree. Bumped from v251. |
+| llama.cpp | b11539 | Bumped from b10595 (originally b10434). That original floor was not a preference: `--reasoning-effort` does not exist before b10434, and on b10067 llama-server exited in ~800 ms with "upstream command exited prematurely". b11539 is well past it. Upstream's script defaults to `master`; we pin. |
+| whisper.cpp | v1.9.5 | Bumped from v1.9.3 (originally v1.8.6). |
+| stable-diffusion.cpp | `f89d9b13…` (full SHA) | Bumped from 97d2990 (originally 90e87bc), specifically to pick up a LoKr-LoRA fix. **Carries a local patch** — `patches/sdcpp-lokr-multidim-batch.patch`, see `patches/README.md`. Pinned by SHA because sd.cpp's `master-<N>-<hash>` tags aren't API-ordered. |
+| ik_llama.cpp | `5194a9e1…` (full SHA) | No release tags upstream; SHA is the only way to pin. Re-pinned from `8337e4cd…`. |
+| audio.cpp | `715108a8…` (full SHA) | Same. Re-pinned from `62735eaf…`. No local patch any more — the VoxCPM2 streaming-click fix landed upstream independently; see `patches/README.md`'s removal note. |
 | torch / torchaudio | 2.11.0 | Re-verified 2026-08-23: torch cu130 ships up to 2.13.0 but **torchaudio cu130 still tops out at 2.11.0**. They must match, so 2.11.0 is still the ceiling. |
 | qwen-tts, snac, fastapi, uvicorn, soundfile, requests, numpy | exact | Newly pinned — see below. |
 
@@ -169,24 +169,40 @@ This image moves **every** axis at once, on purpose: it's a test vehicle, valida
 a unit. Production keeps the old pins until this passes. If it fails, bisect by
 reverting ARGs one at a time.
 
-| component | old (prod) | this image | drift |
-|---|---|---|---|
-| llama-swap | v235 | **v251** | 16 releases |
-| llama.cpp | b10434 | **b10595** | 161 builds |
-| whisper.cpp | v1.8.6 | **v1.9.3** | minor version |
-| stable-diffusion.cpp | 90e87bc (2026-05-06) | **97d2990** (2026-08-19) | ~3.5 months |
-| ik_llama.cpp | — | `8337e4cd…` | new |
-| audio.cpp | — | `62735eaf…` | new |
+| component | original (prod) | previous (test v1) | this bump | drift |
+|---|---|---|---|---|
+| llama-swap | v235 | v251 | **v262** | 27 releases from prod |
+| llama.cpp | b10434 | b10595 | **b11539** | ~1100 builds from prod |
+| whisper.cpp | v1.8.6 | v1.9.3 | **v1.9.5** | 2 minor + 2 patch versions |
+| stable-diffusion.cpp | — | 90e87bc (2026-05-06) | **f89d9b1** (2026-10-09) | ~5 months from prod |
+| ik_llama.cpp | — | `8337e4cd…` | **`5194a9e1…`** | re-pinned |
+| audio.cpp | — | `62735eaf…` | **`715108a8…`** | re-pinned |
+
+This bump's reason for existing: `stable-diffusion.cpp` needed to move to pick up a
+fix for a LoKr-LoRA crash on Krea-2-Turbo (see `patches/sdcpp-lokr-multidim-batch.patch`
+— the fix is NOT upstream yet, so it rides as a local patch on top of the new pin).
+Everything else moved along with it per the "bump as a unit, bisect by reverting one
+ARG at a time" philosophy already established for this image.
 
 Highest-risk items, in order:
 
-1. **llama.cpp b10434 → b10595.** The old pin wasn't arbitrary — `--reasoning-effort`
-   doesn't exist before b10434 and llama-server exited in ~800 ms on b10067. b10595 is
-   far newer so the flag is there, but 161 builds is real drift. First diagnostic on
-   any weirdness: `llama-server --help | grep reasoning`.
-2. **sd.cpp, 3.5 months.** The old pin existed specifically to keep sd-server's CLI
-   byte-for-byte compatible with our 4 `sd-server` entries. **Re-verify those flags.**
-3. **whisper.cpp minor jump** — check the two `whisper-server` entries' flags.
+1. **llama.cpp, ~1100 builds since the original b10434 floor.** That floor wasn't
+   arbitrary — `--reasoning-effort` doesn't exist before b10434 and llama-server
+   exited in ~800 ms on b10067. b11539 is far past it, but this is the single
+   biggest version jump in this bump. First diagnostic on any chat-model weirdness:
+   `llama-server --help | grep reasoning`. Re-verify `--spec-type draft-mtp` /
+   `--spec-draft-n-max` / the froggeric chat-template still behave on the two 27B
+   entries before trusting this image for production chat traffic.
+2. **sd.cpp, ~5 months of drift from the original pin.** The original pin existed
+   to keep sd-server's CLI byte-for-byte compatible with our 4 `sd-server` entries.
+   **Re-verify those flags** — this bump is also carrying a local source patch, which
+   is a second independent risk on top of the version jump itself.
+3. **whisper.cpp, two minor+patch versions** — check the two `whisper-server` entries'
+   flags.
+4. **llama-swap, 11 releases past the previous bump's v251.** Release notes reviewed
+   (v252-v262): mostly UI/tailcat/logging/playground work, nothing touching
+   `-config-dir` merge semantics or sd-server proxying. Lower risk than the above,
+   but still worth a `/v1/models` sanity check after deploy.
 
 `ik_llama.cpp` and `audio.cpp` have no release tags at all, so they're pinned by full
 40-char commit SHA. Note `git fetch --depth=1` requires the *full* SHA — an
@@ -196,19 +212,27 @@ order by the API and are genuinely hard to order by eye.
 
 ## Local patches
 
-`patches/` holds diffs applied on top of the pinned `audio.cpp` commit, after
-upstream's build script has cloned and built it. `patches/README.md` documents
-each one: what it fixes, how to verify it took effect, and its upstream status.
+`patches/` holds diffs applied on top of a pinned upstream commit, after that
+project's own build script has cloned and built it. `patches/README.md`
+documents each one: what it fixes, how to verify it took effect, and its
+upstream status.
 
-Currently one patch, `voxcpm2-streaming-seam.patch`, which stops VoxCPM2's
-streaming output clicking at every 0.16 s chunk boundary. Without it the
-streaming entry is unusable for anything a person listens to, and the workaround
-is a second llama-swap entry running the same model in offline mode.
+Currently one active patch, `sdcpp-lokr-multidim-batch.patch` — fixes a crash
+applying a LoKr-format LoRA to any sd.cpp model whose attention feeds linears
+a 3-D (batched) activation, found live on Krea-2-Turbo. The fix exists
+upstream as a withdrawn, unmerged PR (#1980); we carry it locally since
+nobody else has landed it. See `patches/README.md` for the full writeup.
+
+The former `voxcpm2-streaming-seam.patch` was removed in this bump —
+upstream independently fixed the bug it addressed, using the same technique,
+13 days after the patch was written. Its removal is documented in
+`patches/README.md` rather than silently dropped, in case the measurement
+data in it is ever useful again.
 
 A patch that no longer applies **fails the build** rather than silently
-producing an unpatched binary. That is the intended behaviour after an
-`AUDIO_CPP_VERSION` bump: re-check whether upstream fixed it, then rebase or
-drop the patch.
+producing an unpatched binary. That is the intended behaviour after any
+pin bump: re-check whether upstream fixed it, then rebase or drop the patch
+— exactly what happened to the VoxCPM2 one here.
 
 ## Build
 
