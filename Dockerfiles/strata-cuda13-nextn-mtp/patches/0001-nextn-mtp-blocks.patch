@@ -1,0 +1,65 @@
+diff --git a/include/strata/artifact/gguf_reader.hpp b/include/strata/artifact/gguf_reader.hpp
+index 5b67f54b..3f94218f 100644
+--- a/include/strata/artifact/gguf_reader.hpp
++++ b/include/strata/artifact/gguf_reader.hpp
+@@ -710,6 +710,21 @@ inline std::string read_geometry(const GgufFile& f, core::ModelGeometry& g) {
+     for (const Key& k : keys)
+         if (!read_int(k.key, g.*k.field, k.required)) return err;
+ 
++    // MTP/nextn prediction block (qwen4exp.nextn_predict_layers, e.g. CYBER-FROST-3.8 / Qwen3.8-
++    // Flash-Next-Uncensored-GGUF's IQ4_XS-MTP): block_count counts it, but it is NOT a trunk layer
++    // - the kernels' contract is the trunk (this ModelGeometry), and the MTP head is a separate
++    // subsystem loaded via tools/mtp_fetch.py / mtp_pack.py / mtp_rt.py (--mtp DIR), the same as
++    // qwen35moe's check_architecture_qwen35moe() already does for that family above. A missing key
++    // means 0 (no MTP block), so a file without one is read exactly as before this change.
++    int64_t nextn = 0;
++    if (!read_int("nextn_predict_layers", nextn, false)) return err;
++    if (nextn) {
++        if (nextn >= g.n_layers)
++            return p + "nextn_predict_layers = " + std::to_string(nextn) + " is not smaller than " +
++                   p + "block_count = " + std::to_string(g.n_layers);
++        g.n_layers -= nextn;   // compare/run the TRUNK only; geometry_unsupported() takes it from here unchanged
++    }
++
+     int64_t value_length = g.head_dim, ff_shexp = g.n_ff;
+     if (!read_int("attention.value_length", value_length, false) ||
+         !read_int("expert_shared_feed_forward_length", ff_shexp, false))
+diff --git a/src/core/native_dense.cpp b/src/core/native_dense.cpp
+index 25efb6f6..e44383e0 100644
+--- a/src/core/native_dense.cpp
++++ b/src/core/native_dense.cpp
+@@ -160,7 +160,13 @@ bool eligible(const strata::TensorInfo& tensor, bool include_ple_key) {
+         return include_ple_key && (tensor.type == 42 || tensor.type == 18 || tensor.type == 23 || tensor.type == 8);
+     static const char* suffixes[] = {".attn_qkv.weight", ".attn_gate.weight", ".ssm_out.weight",
+         ".attn_q.weight", ".attn_k.weight", ".attn_v.weight", ".attn_output.weight",
+-        ".ffn_gate_shexp.weight", ".ffn_up_shexp.weight", ".ffn_down_shexp.weight"};
++        ".ffn_gate_shexp.weight", ".ffn_up_shexp.weight", ".ffn_down_shexp.weight",
++        // MTP/nextn prediction head (qwen4exp.nextn_predict_layers > 0): the three 2-D
++        // projections of the draft block. They sit in the last block alongside a normal
++        // trunk layer, so without these the loader finds a shape-only pack row and aborts.
++        // The 1-D nextn norms (enorm/hnorm/hc_head_norm) are excluded by the caller's
++        // shape.size() == 2 test, so they stay on the packed fallback.
++        ".nextn.eh_proj.weight", ".nextn.hc_head_down.weight", ".nextn.hc_head_up.weight"};
+     for (const char* suffix : suffixes) if (name.ends_with(suffix)) return true;
+     return false;
+ }
+diff --git a/tools/iq_pack.py b/tools/iq_pack.py
+index b33723a0..e139f524 100644
+--- a/tools/iq_pack.py
++++ b/tools/iq_pack.py
+@@ -436,7 +436,14 @@ def expert_layout(model: Model, src: pathlib.Path):
+     exps = [n for n in T if n.startswith("blk.") and n.endswith("_exps.weight")]
+     if not exps:
+         return "the model has no expert tensors (blk.N.ffn_{gate,up,down}_exps.weight)"
+-    n_layers = 1 + max(int(n.split(".")[1]) for n in exps)
++    # A model with an MTP/nextn prediction block carries ffn_*_exps in that block too
++    # (qwen4exp.nextn_predict_layers > 0). The engine's expert table is TRUNK-only: its
++    # parser bounds-checks l < n_layers, its layout arrays are sized n_layers, and the MTP
++    # drafter loads its own experts from tools/mtp_rt.py's rt/experts.bin. Emitting a
++    # nextn row therefore only makes the pack unloadable ("a malformed line"). Subtract the
++    # declared nextn blocks so native_experts.txt covers the trunk exactly. Absent key -> 0.
++    nextn = int(model.files[0].metadata.get("qwen4exp.nextn_predict_layers", 0) or 0)
++    n_layers = 1 + max(int(n.split(".")[1]) for n in exps) - nextn
+     n_expert = int(T["blk.0.ffn_gate_inp.weight"].shape[1])   # router rows = experts kept (pruned models ship < 512)
+     if any(int(T["blk.%d.ffn_gate_inp.weight" % l].shape[1]) != n_expert for l in range(n_layers)):
+         return "the routers disagree on the expert count; a per-layer pruned model cannot be packed"
