@@ -1,5 +1,5 @@
 diff --git a/include/strata/artifact/gguf_reader.hpp b/include/strata/artifact/gguf_reader.hpp
-index 5b67f54b..3f94218f 100644
+index 5b67f54b..7594e30a 100644
 --- a/include/strata/artifact/gguf_reader.hpp
 +++ b/include/strata/artifact/gguf_reader.hpp
 @@ -710,6 +710,21 @@ inline std::string read_geometry(const GgufFile& f, core::ModelGeometry& g) {
@@ -24,6 +24,72 @@ index 5b67f54b..3f94218f 100644
      int64_t value_length = g.head_dim, ff_shexp = g.n_ff;
      if (!read_int("attention.value_length", value_length, false) ||
          !read_int("expert_shared_feed_forward_length", ff_shexp, false))
+@@ -747,9 +762,16 @@ inline std::string read_geometry(const GgufFile& f, core::ModelGeometry& g) {
+     // The layer split, twice over: the interval, and a ratio per layer that is non-zero (the indexer's pooling
+     // block) exactly on the full-attention layers.
+     if (const MetaValue* v = f.get(p + "attention.compress_ratios")) {
+-        if (v->type != MetaType::ARRAY || v->count != (uint64_t) g.n_layers || v->items.size() != v->count)
++        // A model with an MTP/nextn block (nextn > 0, g.n_layers already reduced to the trunk above) may carry
++        // this array sized to the RAW block_count (trunk + nextn), since the GGUF writer that emits one entry
++        // per block has no reason to know the engine treats the last `nextn` of them specially. Accept either
++        // size; only the first g.n_layers (trunk) entries are read below either way - a value for the nextn
++        // block itself is not a trunk layer-split entry and is never consulted.
++        if (v->type != MetaType::ARRAY || v->items.size() != v->count ||
++            (v->count != (uint64_t) g.n_layers && v->count != (uint64_t) g.n_layers + (uint64_t) nextn))
+             return p + "attention.compress_ratios must list one entry for each of the " + std::to_string(g.n_layers) +
+-                   " layers";
++                   " layers" + (nextn ? " (or " + std::to_string(g.n_layers + nextn) + ", trunk + the "
++                   + std::to_string(nextn) + " MTP block(s))" : std::string());
+         // A list of zeros only is a converter's placeholder, not a layer split (#2396: orcarouter's
+         // Qwen3.8-Flash-Next-Uncensored GGUFs carry 48 zeros; 0.1.43 never read the key): it is treated as absent
+         // and the compiled pooling block is used.  A list with any non-zero entry is checked in full below.
+diff --git a/include/strata/core/family_layout.hpp b/include/strata/core/family_layout.hpp
+index 554350d3..b76ff9e7 100644
+--- a/include/strata/core/family_layout.hpp
++++ b/include/strata/core/family_layout.hpp
+@@ -40,7 +40,7 @@ inline bool geometry_from_gguf(const strata::GgufFile& meta, ModelGeometry& g, i
+         if (const strata::MetaValue* v = meta.get(p + key))
+             if (v->is_num()) dst = (int64_t) v->u;
+     };
+-    int64_t block_count = g.n_layers, key_length = g.head_dim, value_length = -1;
++    int64_t block_count = g.n_layers, key_length = g.head_dim, value_length = -1, qwen4exp_nextn = 0;
+     num("block_count", block_count);
+     num("embedding_length", g.n_embd);
+     num("attention.head_count", g.n_head);
+@@ -65,12 +65,32 @@ inline bool geometry_from_gguf(const strata::GgufFile& meta, ModelGeometry& g, i
+         g.hc = g.hc_lr = 0;                 // a plain pre-norm residual
+         g.idx_q_heads = g.idx_key_dim = 0;  // dense attention, no sparse indexer
+     } else {
++        // qwen4exp's own MTP/nextn block (e.g. CYBER-FROST-3.8, orcarouter's IQ4_XS-MTP):
++        // block_count includes it same as qwen35moe's does, so the count must be read here
++        // too, or line 83's old block_count - g.n_mtp_layers would silently keep n_layers at
++        // the RAW block_count (one past the trunk this engine's kernels are compiled for).
++        // Mirrors check_architecture()'s own qwen4exp.nextn_predict_layers handling
++        // (include/strata/artifact/gguf_reader.hpp) - that function validates the key is
++        // internally consistent (block_count > nextn); this one just needs the same count
++        // to compute the same trunk size.
++        //
++        // Read into a LOCAL (qwen4exp_nextn), NOT g.n_mtp_layers: that field also feeds
++        // compiled_geometry_mismatch()'s "the in-file MTP layers" pin, which exists because
++        // qwen35moe's compiled kernels run its MTP layer natively in-engine and are built for
++        // an exact count (0 by default). qwen4exp's MTP is architecturally different - a
++        // SEPARATE runtime entirely (tools/mtp_fetch.py / mtp_pack.py / mtp_rt.py, --mtp DIR;
++        // see docs/CYBER_FROST.md and docs/ORCA.md) that the trunk kernels have no awareness
++        // of at all, so that pin must stay 0 for qwen4exp regardless of whether the file
++        // declares a block - writing a nonzero g.n_mtp_layers here would make a perfectly
++        // loadable qwen4exp+MTP file fail that mismatch check for no real reason. Absent key
++        // -> qwen4exp_nextn stays 0, i.e. unchanged for every qwen4exp model without one.
++        num("nextn_predict_layers", qwen4exp_nextn);
+         num("hyper_connection.count", g.hc);
+         num("hyper_connection.low_rank", g.hc_lr);
+         num("attention.indexer.head_count", g.idx_q_heads);
+         num("attention.indexer.key_length", g.idx_key_dim);
+     }
+-    g.n_layers = block_count - g.n_mtp_layers;
++    g.n_layers = block_count - g.n_mtp_layers - qwen4exp_nextn;
+     g.ssm_conv_channels = 2 * g.ssm_state_size * g.ssm_k_heads + g.ssm_value_dim;
+     if (const strata::MetaValue* v = meta.get("tokenizer.ggml.tokens"))
+         if (v->type == strata::MetaType::ARRAY && v->count > 0) g.n_vocab = (int64_t) v->count;
 diff --git a/src/core/native_dense.cpp b/src/core/native_dense.cpp
 index 25efb6f6..e44383e0 100644
 --- a/src/core/native_dense.cpp

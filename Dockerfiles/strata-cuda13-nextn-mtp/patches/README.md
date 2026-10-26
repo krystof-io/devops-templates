@@ -70,13 +70,27 @@ the first place.
 
 ### Known gaps — what has NOT been verified yet
 
-- **No CUDA build has been run against this patch yet.** `git apply --check` confirms it
-  applies; it does NOT confirm it compiles. Build this image before trusting the patch further.
-- **No real model load has been tested with this build.** The upstream PR's own measurements
-  (85.7% MTP acceptance, clean load) are against `CYBER-FROST-3.8`, a different model, on
-  their hardware, at an earlier commit. Re-verify end-to-end against
-  `orcarouter/Qwen3.8-Flash-Next-Uncensored-GGUF`'s `IQ4_XS-MTP` quant, the model this was
-  written for, before calling this done.
-- **Regression risk for existing models (Q2_0, Orca IQ2_M) is reasoned, not measured** on this
-  specific build. Re-test at least one non-MTP model against this image before cutting over
-  `manual/strata/deployment.yaml`'s production image tag.
+- **Build and real-model-load testing completed on 2026-10-26.** First build of this image
+  (against the original 3-change patch) exposed TWO real bugs, not one — see below.
+- **Real bug #2, found and fixed during the first live load attempt**: subtracting `nextn`
+  from `g.n_layers` in `read_geometry()` is correct for the trunk-size comparison, but it also
+  shrinks the size `qwen4exp.attention.compress_ratios` is checked against — and this GGUF's
+  array is sized to the RAW `block_count` (49), not the reduced trunk (48), producing a second,
+  different rejection: `qwen4exp.attention.compress_ratios must list one entry for each of the
+  48 layers`. Fixed by accepting EITHER size (`g.n_layers` or `g.n_layers + nextn`) in that one
+  check — every loop that reads the array already only touches the first `g.n_layers` (trunk)
+  entries, so no other code needed to change. This specific model's `compress_ratios` turned out
+  to be all-zeros anyway (a known placeholder shape per the pre-existing `#2396` comment this
+  function already carried for orcarouter GGUFs), so the fix's effect here is just "stop
+  rejecting the file before reaching that all-zeros short-circuit" — not yet proven against a
+  model whose `compress_ratios` carries real non-zero values at the reduced trunk size.
+- **End-to-end real load of `orcarouter/Qwen3.8-Flash-Next-Uncensored-GGUF`'s `IQ4_XS-MTP`
+  quant: in progress as of this commit** — the "malformed line" bug is confirmed gone (pack
+  rebuild produces 48 rows, 0 `blk.48` references, matching `CYBER_FROST.md`'s own documented
+  verification exactly) and the compress_ratios bug above is fixed; whether the engine reaches
+  a real `READY` state and serves a coherent completion with this model's embedded MTP head is
+  the next thing to confirm, not yet in hand as of this patch version.
+- **Regression-tested against the known-good Orca IQ2_M model**: confirmed clean — real
+  completion returned, MTP speculative decoding active (`draft_n_accepted` present), vision
+  active (`modalities.vision: true`), on this exact image. This is real evidence the patch is a
+  no-op for a model without an MTP/nextn block, not just the originally-reasoned claim.
