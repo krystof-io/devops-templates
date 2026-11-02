@@ -1,0 +1,242 @@
+diff --git a/docs/DETAILS.md b/docs/DETAILS.md
+index e2565af6f98..c6fc5e5a0f7 100644
+--- a/docs/DETAILS.md
++++ b/docs/DETAILS.md
+@@ -507,8 +507,9 @@ applies at the next start. Network, key, MCP and program keys are not editable t
+   its last streamed chunk, and in the `message_delta` event and the message of `/v1/messages`; up to five names). A client that
+   wants to recover can answer the model with the tool names it does have and ask again; Strata never runs or forwards a call for a
+   tool the request did not declare. The server window prints the same names (`N <tool_call> block(s) ... went back as text`), and
+-  `/metrics/prometheus` counts the blocks in `strata:tool_calls_unread_total`. A block that is malformed (not an undeclared name) is counted
+-  there and in the window, but has no name to list.
++  `/metrics/prometheus` counts the blocks in `strata:tool_calls_unread_total`. The reason is `"in_code"` when the block sits inside
++  a code fence or inline code for a declared tool (#1058 keeps it text as the quoted example it may be) and `"malformed"` when it
++  opened like a call with no name to read; a malformed block is counted there and in the window but has no name to list (#4071).
+ - JSON output: `response_format: {"type":"json_object"}` or `{"type":"json_schema", ...}` on `/v1/chat/completions`. The schema
+   must accept only JSON objects at its root (`"type":"object"`, or `anyOf`/`oneOf` of object schemas). Local `#` references
+   work and remote ones are refused. This is schema prompting followed by server validation, not grammar-constrained
+diff --git a/serve/frontend.py b/serve/frontend.py
+index 63e319b82c2..cddaba222ef 100644
+--- a/serve/frontend.py
++++ b/serve/frontend.py
+@@ -977,6 +977,10 @@ def __init__(self, thinking: bool = True, tools: list[dict] | None = None, strea
+                         if len(names) == 1 and alias not in self.schemas}
+         self.unread = 0              # #3441: `<tool_call>` blocks that opened like a call and were returned as text
+         self.unread_names: list[str] = []   # the names (first few) of those that named a tool the request did not declare
++        # #4071: the same first-few list with the reason each block went back as text: "undeclared" (a name the request
++        # did not offer) or "in_code" (a call-shaped block inside a code fence - #1058's quote rule, but a client that
++        # declares no tools cannot tell the model meant a call from a quoted example without being told).
++        self.unread_info: list[dict] = []
+         # stream_tools: a tool call is also reported while it is being written - "tool_start" (its name and id) as
+         # soon as the name is known, then "tool_args" pieces of its JSON arguments (string parameters character by
+         # character; other types whole, once complete) - before the final "tool_call".  Without it, a client sees
+@@ -1003,6 +1007,16 @@ def clean(self) -> bool:
+         serve/dsml.py's does, also counts what it holds)."""
+         return not self.buf
+ 
++    def _mark_unread(self, name: str, reason: str) -> None:
++        """#3441/#4071: count a `<tool_call>` block that is going back as text, naming it (first few only)
++        and saying why: 'undeclared' (a name the request did not offer) or 'in_code' (a call-shaped block inside a
++        code fence - #1058's quote rule, invisible to the client without this)."""
++        self.unread += 1
++        if name and len(self.unread_names) < 5:
++            self.unread_names.append(name[:80])
++        if name and len(self.unread_info) < 5:
++            self.unread_info.append({"name": name[:80], "reason": reason})
++
+     def _ok_at(self, p: int) -> bool:
+         """self.buf[p] would open a call: at the start of a line, outside a code fence and inline code."""
+         snap = (self.fence, self.line, self.ticks)
+@@ -1449,6 +1463,26 @@ def feed(self, delta: str) -> list[Event]:
+                 in_code = self._in_code()
+                 self.fence, self.line, self.ticks = snap
+                 if in_code:
++                    # #1058: inside a fence or inline code a call stays text (a quoted example).  #4071: it is still
++                    # a call-shaped block the client gets as text, so name it - the toolless client cannot tell a
++                    # meant call from a quoted example without being told.  The name held until complete like a
++                    # partial tag, so whole and streamed outputs count the same blocks.
++                    after_ic = self.buf[i + len(CALL_START):].lstrip()
++                    ic = re.match(r"<function=(\s*[^<>\s]+\s*)>", after_ic)
++                    if ic is None and (not after_ic or FUNC_START.startswith(after_ic)
++                                       or re.fullmatch(r"<function=\s*[^<>\s]*\s*", after_ic)):
++                        j = i
++                        while j > 0 and self.buf[j - 1] == "\n":
++                            j -= 1
++                        if j > 0:
++                            out.append(Event("content", self._track(self.buf[:j])))
++                            self.buf = self.buf[j:]
++                        return out
++                    if ic is not None:
++                        nm = ic.group(1).strip()
++                        self._mark_unread(nm, "in_code" if self._callable(nm) else "undeclared")
++                    elif after_ic.startswith("<"):
++                        self._mark_unread("", "in_code")
+                     out.append(Event("content", self._track(self.buf[:i + len(CALL_START)])))
+                     self.buf = self.buf[i + len(CALL_START):]
+                     continue
+@@ -1473,7 +1507,7 @@ def feed(self, delta: str) -> list[Event]:
+                 kind = self._follower(after) if self.recover else None
+                 if (after.startswith("<") and kind is None and not FUNC_START.startswith(after)
+                         and not after.startswith(FUNC_START)):
+-                    self.unread += 1
++                    self._mark_unread("", "malformed")     # opened like a call, no <function= name to read
+                 if kind in ("param", "json"):
+                     if i and self.buf[:i].strip():
+                         out.append(Event("content", self._track(self.buf[:i].rstrip("\n"))))
+@@ -1519,9 +1553,8 @@ def feed(self, delta: str) -> list[Event]:
+                             self.buf = self.buf[j:]
+                         return out
+                     if gt >= 0 and (nl < 0 or gt < nl) and not self._callable(after[len(FUNC_START):gt].strip()):
+-                        self.unread += 1                 # logged by the server: otherwise "the model ignored my tool" is the only clue
+-                        if len(self.unread_names) < 5:
+-                            self.unread_names.append(after[len(FUNC_START):gt].strip()[:80])
++                        # logged by the server: otherwise "the model ignored my tool" is the only clue
++                        self._mark_unread(after[len(FUNC_START):gt].strip(), "undeclared")
+                         out.append(Event("content", self._track(self.buf[:i + len(CALL_START)])))
+                         self.buf = self.buf[i + len(CALL_START):]
+                         continue
+diff --git a/serve/server.py b/serve/server.py
+index 8c5213b1f80..fdef2d00bac 100644
+--- a/serve/server.py
++++ b/serve/server.py
+@@ -5762,14 +5762,18 @@ def replica_selected(index: int) -> None:
+         rejected = []
+         if parser.unread:
+             named = getattr(parser, "unread_names", None)
++            info = getattr(parser, "unread_info", None) or []
+             print(f"[strata] {parser.unread} <tool_call> block(s) in the answer did not read as a call of a declared "
+                   "tool and went back as text (a name the request did not declare, or a form the template does "
+                   "not use)" + (f"; the names the model wrote: {', '.join(named)}" if named else "")
+                   + "; the response carries them as strata_rejected_tool_calls, /metrics counts them", flush=True)
+             with self.status_lock:
+                 self.totals["tool_calls_unread"] = self.totals.get("tool_calls_unread", 0) + parser.unread
+-            # #3796: the same names for the client (a machine-readable marker next to the text, which stays as the model wrote it)
+-            rejected = [{"name": nm, "reason": "undeclared"} for nm in named or []]
++            # #3796/#4071: the same names for the client (a machine-readable marker next to the text, which stays as
++            # the model wrote it); #4071 adds the reason: "undeclared", "in_code" (a fence, #1058), or "malformed".
++            rejected = [{"name": it["name"], "reason": it.get("reason", "undeclared")} for it in info]
++            if not rejected and named:                   # an engine build without per-block reasons
++                rejected = [{"name": nm, "reason": "undeclared"} for nm in named]
+         if stops is not None and stops.hit is None and stops.held:
+             yield "event", Event("content", stops.flush())     # the held tail was not a stop string after all
+         done = {"finish": finish, "completion_tokens": n, "reused": (timings or {}).get("cache_n", 0),
+diff --git a/serve/test_unread_call_marker.py b/serve/test_unread_call_marker.py
+new file mode 100644
+index 00000000000..e68f7f1ffb5
+--- /dev/null
++++ b/serve/test_unread_call_marker.py
+@@ -0,0 +1,115 @@
++"""#4071: every `<tool_call>` block that goes back as text is counted and named, fenced or not.
++
++Observed with Qwen3.8-Flash-Next IQ3_S served by Strata 0.2.7 and used through a
++Chat Completions client that declares no tools (Open WebUI, asked to "make an SVG and
++save it"): the model wrote a complete call for `write_file` inside a ```xml fence.
++The undeclared-name rule (#3075) keeps it text, but the fence rule (#1058) passed it
++without even incrementing `unread` - so neither the serve warning nor the
++strata_rejected_tool_calls marker (#3796) ever mentioned it, and the client could not
++tell "the model wrote a call and it was dropped" from "the model chose not to call".
++
++The rule kept: fenced and undeclared blocks STAY text (a quoted example must not
++become a call). What changes is visibility - each block counts once, and
++`unread_info` says why: "undeclared" (a name the request did not offer), "in_code"
++(a call-shaped block for a declared name inside a fence or inline code), or
++"malformed" (opened like a call with no `<function=` name to read).
++
++    python -m unittest serve.test_unread_call_marker -v
++"""
++import sys
++import unittest
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
++
++from serve.frontend import OutputParser  # noqa: E402
++
++SVG = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="60" fill="red"/></svg>'
++P = "<" + "parameter="   # built at runtime so this source never looks like a call
++
++
++def call_block(name: str) -> str:
++    return ("<tool_call>\n<function=" + name + ">\n"
++            + P + "path>\ncircle.svg\n</" + "parameter>"
++            + P + "content>\n" + SVG + "\n</" + "parameter>"
++            + "</function>\n</tool_call>")
++
++
++def run(parser: OutputParser, text: str, chunk: int = 0):
++    """Feed `text` (whole, or in `chunk`-sized pieces) -> (content, call names, unread, names, info)."""
++    events = []
++    if chunk:
++        for k in range(0, len(text), chunk):
++            events += parser.feed(text[k:k + chunk])
++    else:
++        events += parser.feed(text)
++    events += parser.finish()
++    return ("".join(e.text for e in events if e.kind == "content"),
++            [e.call.name for e in events if e.kind == "tool_call"],
++            parser.unread, list(parser.unread_names), list(parser.unread_info))
++
++
++class FencedBlockIsCounted(unittest.TestCase):
++    """The #4071 shape: a complete call inside a ``` fence, request declares no tools."""
++
++    def test_fenced_undeclared_call_is_named_with_a_reason(self):
++        content, calls, unread, names, info = run(
++            OutputParser(thinking=False, tools=None, declared_only=True),
++            "Here it is:\n```xml\n" + call_block("write_file") + "\n```\n")
++        self.assertIn("<tool_call>", content)            # stays text, as the model wrote it (#3075 rule kept)
++        self.assertEqual(calls, [])                     # never a call: the client has no such tool to run
++        self.assertEqual(unread, 1)                     # #4071: counted, where before this was silent
++        self.assertEqual(names, ["write_file"])
++        self.assertEqual(info, [{"name": "write_file", "reason": "undeclared"}])
++
++    def test_fenced_declared_call_is_in_code(self):
++        content, calls, unread, names, info = run(
++            OutputParser(thinking=False, tools=[{"name": "write_file"}]),
++            "Example:\n```xml\n" + call_block("write_file") + "\n```\n")
++        self.assertIn("<tool_call>", content)            # #1058: a quoted example stays text
++        self.assertEqual(calls, [])
++        self.assertEqual(info, [{"name": "write_file", "reason": "in_code"}])  # the client can still learn it
++
++    def test_inline_code_block_is_counted_once(self):
++        _, _, unread, _, info = run(
++            OutputParser(thinking=False, tools=None, declared_only=True),
++            "The format is `" + call_block("write_file").replace("\n", "") + "` and then prose.")
++        self.assertEqual(unread, 1)
++        self.assertEqual(info, [{"name": "write_file", "reason": "undeclared"}])
++
++    def test_streamed_counts_match_whole(self):
++        for fence in ("```xml\n", "```\n"):
++            raw = "Here:\n" + fence + call_block("write_file") + "\n```\n"
++            whole = run(OutputParser(thinking=False, tools=None, declared_only=True), raw)
++            for chunk in (1, 3, 17):
++                streamed = run(OutputParser(thinking=False, tools=None, declared_only=True), raw, chunk)
++                with self.subTest(fence=fence, chunk=chunk):
++                    self.assertEqual(streamed, whole)   # same content, same calls, same counts
++
++
++class OtherPathsStillCount(unittest.TestCase):
++    """The counts that already worked keep working, now with the reason attached."""
++
++    def test_bare_undeclared_call(self):
++        _, calls, unread, names, info = run(
++            OutputParser(thinking=False, tools=None, declared_only=True),
++            "Sure.\n" + call_block("write_file"))
++        self.assertEqual((calls, unread, names), ([], 1, ["write_file"]))
++        self.assertEqual(info, [{"name": "write_file", "reason": "undeclared"}])
++
++    def test_declared_call_is_still_a_call(self):
++        _, calls, unread, _, info = run(
++            OutputParser(thinking=False, tools=[{"name": "write_file"}]),
++            call_block("write_file"))
++        self.assertEqual(calls, ["write_file"])
++        self.assertEqual((unread, info), (0, []))
++
++    def test_prose_naming_the_tag_stays_clean(self):
++        _, calls, unread, _, info = run(
++            OutputParser(thinking=False, tools=None, declared_only=True),
++            "I will use a <tool_call> block to save it.")
++        self.assertEqual((calls, unread, info), ([], 0, []))
++
++
++if __name__ == "__main__":
++    unittest.main(verbosity=2)

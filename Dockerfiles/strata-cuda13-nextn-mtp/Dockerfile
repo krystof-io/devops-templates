@@ -91,7 +91,24 @@
 #             (nvidia/cuda:13.0.0-devel-ubuntu24.04) and our driver's ceiling
 #             (worker-4 advertised CUDA 13.2 in llama-swap-unified-cuda13's
 #             own pin comment; 13.0 is within that ceiling).
-ARG STRATA_VERSION=v0.2.6
+# ── Version pinning ──────────────────────────────────────────────
+# Strata:     v0.2.6 -> v0.2.8, commit 878ef09cc9092a41a37dac32fd6fe461e47fa326
+#             (2026-10-29). Bumped SPECIFICALLY to carry PR #4613 (see
+#             patches/0002-unread-call-marker.patch below) — that PR's own
+#             base commit (46c152a, 2026-10-28) sits between v0.2.7 and
+#             v0.2.8, so v0.2.8 is the FIRST tagged release downstream of
+#             it. Confirmed the patch isn't itself IN v0.2.8 yet (PR is
+#             still open/unmerged as of this bump) via a direct substring
+#             check of serve/frontend.py's unread_info field — absent.
+#             70 commits sit between the PR's base and v0.2.8 (mostly
+#             SYCL/DeepSeek engine work, unrelated) — `git apply --check`
+#             verified clean against a fresh v0.2.8 clone before trusting
+#             this pin (see patches/README.md's own verification command,
+#             same discipline as the existing nextn-mtp patch). The
+#             nextn-mtp patch (0001) was ALSO re-verified against v0.2.8
+#             specifically for this bump, not just carried forward — see
+#             that patch's own README entry for the result.
+ARG STRATA_VERSION=v0.2.8
 ARG CUDA_IMAGE=docker-proxy.private.krystof.io/nvidia/cuda:13.0.0-devel-ubuntu24.04
 ARG RUNTIME_BASE=docker-proxy.private.krystof.io/ubuntu:24.04
 
@@ -113,7 +130,21 @@ RUN git clone --depth 1 --branch "${STRATA_VERSION}" https://github.com/Niko1221
 # STRATA_VERSION fails the build LOUDLY instead of silently shipping an
 # unpatched (and therefore non-functional, for our purpose) binary — same
 # discipline as llama-swap-unified-cuda13's sd.cpp LoKr patch step in this repo.
-COPY patches/0001-nextn-mtp-blocks.patch /patches/
+# 0002 added 2026-10-29: PR #4613 (serve/, no engine code) — makes a
+# <tool_call>-shaped block inside a code fence/inline-code COUNTED and
+# NAMED in strata_rejected_tool_calls, same as the already-working bare
+# and malformed paths. Fixes a real diagnostics gap (#4071): a model
+# writing a declared-only or fenced call currently vanishes with zero
+# signal on either path — see patches/README.md's own writeup for the
+# live GitHub-issue thread that surfaced this (multiple independent
+# reporters, including one hitting the identical shape through
+# llama-swap, not just Strata) and why #4613 is the right fix (does NOT
+# change which blocks stay text — #3075/#1058's rules are explicitly
+# preserved — only makes the previously-silent fenced case visible to a
+# client via unread_info/strata_rejected_tool_calls). Still unmerged
+# upstream as of this bump (open PR, not a maintainer rejection) — same
+# "real fix, not yet shipped" situation as 0001.
+COPY patches/0001-nextn-mtp-blocks.patch patches/0002-unread-call-marker.patch /patches/
 RUN set -eux; \
     for p in /patches/*.patch; do \
         echo "=== applying $(basename "$p") ==="; \
@@ -180,6 +211,22 @@ RUN python3 /src/packaging/package_terminal.py --out /out --cache /cache \
  && tar -xzf /out/strata-terminal-*-linux-x86_64.tar.gz -C /opt/strata \
  && mv /opt/strata/strata-terminal-* /opt/strata/terminal \
  && /opt/strata/terminal/bin/strata --version
+# jsonschema, 2026-10-29: serve/structured.py's own json_schema response-format path lazily
+# imports this and falls back to "only checked to be one JSON object" (no real schema
+# validation) when it's missing — confirmed live on the production pod's own log line:
+#   [strata] response_format json_schema: the Python package jsonschema is not installed,
+#   so answers are only checked to be one JSON object (python -m pip install "jsonschema>=4.23,<5")
+# That log line gives the exact pin; installed straight into the Terminal's bundled
+# interpreter (packaging/package_terminal.py's own standalone CPython + locked runtime
+# wheels — see that script's own header comment: no internet pip install at USER runtime
+# by design, for THEIR release pipeline). This is a one-time BUILD-time install into OUR
+# custom image, same category as 0001/0002's source patches above — not fighting their
+# hash-locked release mechanism, just adding one optional package their own code already
+# knows how to use when present. serve/structured.py imports it lazily (first request that
+# actually uses json_schema), so this has zero effect on any model/request that doesn't use
+# response_format: json_schema.
+RUN /opt/strata/terminal/python/bin/python3 -m pip install --no-cache-dir "jsonschema>=4.23,<5" \
+ && /opt/strata/terminal/python/bin/python3 -c "import jsonschema; print('jsonschema', jsonschema.__version__, 'installed OK')"
 # llama.cpp at the commit setup.py pins: fetched here, so the first start does not depend on GitHub. Only gguf-py (the model preparation
 # tools) and the file setup.py looks for (ggml/CMakeLists.txt) are kept: 170 MB become a few
 RUN cd /opt/strata/terminal && STRATA_CONTROL_INSTALL=1 STRATA_INSTALL_DIR=/opt/strata/seed PYTHONNOUSERSITE=1 \

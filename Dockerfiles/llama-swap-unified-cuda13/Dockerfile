@@ -57,14 +57,31 @@
 # this one passes. If it fails, bisect by reverting ARGs one at a time — the old
 # values are recorded below.
 #
-# llama.cpp:     b10434 -> b10595 -> b11539. The ORIGINAL pin was not arbitrary:
-#                `--reasoning-effort` does not exist before b10434 (on b10067
-#                llama-server exited in ~800ms with "upstream command exited
-#                prematurely"). b11539 is ~950 builds past that floor — re-check
-#                `--reasoning-effort`/`--spec-type draft-mtp`/chat-template flags
-#                on the two 27B chat entries before trusting this blindly. FIRST
-#                THING TO CHECK on any weirdness:
+# llama.cpp:     b10434 -> b10595 -> b11539 -> b11985. The ORIGINAL pin was not
+#                arbitrary: `--reasoning-effort` does not exist before b10434 (on
+#                b10067 llama-server exited in ~800ms with "upstream command exited
+#                prematurely"). b11539 is ~950 builds past that floor; this bump
+#                (2026-10-29) moves 446 builds further specifically to pick up
+#                --moe-cache-mib's SLRU cache replacement (PR #30637, merged
+#                2026-10-19 — the GPU-side MoE expert cache itself, PR #29887,
+#                was ALREADY in b11539/10a60cf, confirmed live via --help before
+#                this bump was even started) plus a pinned-CUDA-host-buffer
+#                size-cap fix (PR #30449, merged 2026-10-16, caps pinned
+#                allocations at 4 GB — relevant because --moe-cache-mib backs
+#                its cache with a pinned host buffer). Compared the full 446-commit
+#                range for anything touching --reasoning-effort/--spec-type
+#                draft-mtp/--lazy-mode/--load-mode/--n-cpu-moe/--jinja/
+#                --override-tensor by name — only --jinja saw activity (4 Jinja
+#                template-engine bugfixes, no flag removal) and llama.cpp's own
+#                grep for "remov"/"deprecat"/"breaking" in those 446 commits
+#                turned up nothing touching a flag this image's configs use.
+#                Re-check `--reasoning-effort`/`--spec-type draft-mtp`/chat-template
+#                flags on the 27B chat entries and qwen4exp entries anyway before
+#                trusting this blindly — a commit-message grep is not the same as
+#                re-running the real request. FIRST THING TO CHECK on any weirdness:
 #                  /usr/local/bin/llama-server --help | grep reasoning
+#                SECOND THING TO CHECK specifically for this bump:
+#                  /usr/local/bin/llama-server --help | grep moe-cache
 # whisper.cpp:   v1.8.6 -> v1.9.3 -> v1.9.5. Patch-version bump; watch for CLI
 #                flag changes in the two whisper-server entries.
 # sd.cpp:        90e87bc (2026-05-06) -> 97d2990 (2026-08-19) -> f89d9b1
@@ -91,7 +108,7 @@ ARG CUDA_VERSION=13.2.1
 ARG UBUNTU_VERSION=24.04
 ARG CUDA_ARCH=120
 ARG LLAMA_SWAP_VERSION=262
-ARG LLAMA_CPP_VERSION=b11539
+ARG LLAMA_CPP_VERSION=b11985
 ARG WHISPER_CPP_VERSION=v1.9.5
 ARG SD_CPP_VERSION=f89d9b13d730eabeede7314ce49dacd18d3c90c2
 ARG IK_LLAMA_VERSION=5194a9e1451b885e24dd5a065f650864e8807c59
