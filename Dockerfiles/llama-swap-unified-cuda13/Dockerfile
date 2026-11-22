@@ -104,6 +104,33 @@
 #                window defaulting to 3 patches) — the local
 #                voxcpm2-streaming-seam.patch is REMOVED as of this bump since
 #                it no longer applies cleanly and is no longer needed.
+#                715108a (2026-10-09) -> 337af0c (2026-11-21), 441 commits.
+#                Bumped for Higgs TTS 3 (family higgs_audio_tts): 715108a ships
+#                it OFFLINE-only; streaming landed one day later (#859), plus
+#                reference_prefill_mode=exact (#874), allow_incomplete_generation
+#                (#1009), NaN-logit filtering (#1032), token-order fix (#1038).
+#                ⚠ NOT BUILT YET AT THIS PIN when this line was written. Checked
+#                by reading the source only: every -D flag install-audio.sh
+#                (llama-swap v262) passes still exists; the server-frontends
+#                submodule URL went from git@github.com: to a relative path
+#                (the script's insteadOf rewrite becomes a no-op, still fine);
+#                audiocpp_server still takes --config/--voice-dir/--no-ui and
+#                the config keys lazy_load/session_options/
+#                default_request_options. The range contains two 🚨 option-
+#                normalization refactors (#875, #879) and a route-alias one
+#                (#893). Every option our audiocpp/*.json and callers use is
+#                still declared in the specs (voxcpm2: retry_badcase,
+#                guidance_scale, audiovae_encoder_sample_capacity; omnivoice:
+#                guidance_scale, language, class_temperature, speed,
+#                num_inference_steps, instruct) — but RE-RUN the real requests:
+#                  * voxcpm2 + omnivoice clone, streaming and offline
+#                  * omnivoice: top-level `instruct` may now be honoured
+#                    (it was silently ignored at 715108a), and whether
+#                    response_format:"pcm" is still rejected
+#                  * voxcpm2 30 s reference (luna) — the capacity override
+#                OmniVoice also gained native batching (#1208) and VoxCPM2
+#                smaller step graphs (#950): expect VRAM/latency numbers in
+#                17-audio.yaml to move.
 ARG CUDA_VERSION=13.2.1
 ARG UBUNTU_VERSION=24.04
 ARG CUDA_ARCH=120
@@ -112,7 +139,7 @@ ARG LLAMA_CPP_VERSION=b11985
 ARG WHISPER_CPP_VERSION=v1.9.5
 ARG SD_CPP_VERSION=f89d9b13d730eabeede7314ce49dacd18d3c90c2
 ARG IK_LLAMA_VERSION=5194a9e1451b885e24dd5a065f650864e8807c59
-ARG AUDIO_CPP_VERSION=715108a8efde4bb9831dd19771dc3a5efbbdc953
+ARG AUDIO_CPP_VERSION=337af0c88c97fa0146ed7c0473f3a70ac828474c
 
 # ── Python pins for the TTS venvs ────────────────────────────────
 # The old image pinned torch/torchaudio but left EVERYTHING else floating
@@ -274,7 +301,27 @@ FROM builder-base AS llama-build
 ARG LLAMA_CPP_VERSION
 RUN --mount=type=cache,id=ccache-cuda13,target=/ccache \
     --mount=type=cache,id=llama-cuda13,target=/src/llama.cpp/build \
-    BACKEND=cuda bash /build/install-llama.sh "${LLAMA_CPP_VERSION}"
+    rm -rf /src/llama.cpp/build/tools/ui \
+    && HF_UI_VERSION="${LLAMA_CPP_VERSION}" BACKEND=cuda bash /build/install-llama.sh "${LLAMA_CPP_VERSION}"
+# ^ HF_UI_VERSION — WITHOUT IT THE BUILD BREAKS ON ITS OWN, WITH NO PIN CHANGE.
+# llama.cpp does not build its web UI here; it downloads a pre-built one from
+# the HF bucket ggml-org/llama-ui, keyed "b<build number>". The build number is
+# `git rev-list --count HEAD`, and install-llama.sh fetches with --depth=1, so
+# it is always 1 -> "b1" -> 404 -> scripts/ui-assets.cmake falls back to
+# "latest". That worked only while latest still matched the pin. On 2026-11-21
+# latest (post-v1.0.0 UI, SvelteKit chunk layout) no longer contains the
+# bundle[hash].js / bundle[hash].css / workbox[hash].js that b11985's
+# ui_validate_assets requires, and the llama stage failed with
+#   "UI: missing required asset(s)".
+# tools/ui/CMakeLists.txt reads the HF_UI_VERSION env var first, so naming the
+# tag gets the UI built for THIS pin (bucket path b11985 verified present, with
+# the expected bundle files). ⚠ This assumes LLAMA_CPP_VERSION is a bNNNNN tag;
+# if it is ever a SHA or a vX.Y.Z tag, set HF_UI_VERSION to the matching
+# bNNNNN explicitly.
+# rm -rf build/tools/ui: the build dir is a PERSISTENT cache mount and the
+# downloaded dist lives in it; clear it so a UI from another version (such as
+# the mismatched "latest" above) cannot be reused. Small re-download; ccache
+# and object files are untouched.
 
 # ─────────────────────────────────────────────────────────────────
 # Stage 7: llama-swap binary + vllm-wrapper
@@ -365,7 +412,7 @@ RUN mkdir -p /app \
 # constraint disappears from this file entirely. Do that only once audio.cpp is
 # proven to cover the clone case (see below).
 #
-# Kept ON by default because the live entry is:
+# It WAS kept on by default (until 2026-11-21, see below) because the live entry is:
 #   qwen3-tts:1.7b-clone -> qwen3tts_server.py --mode clone --voices-dir /models/tts-voices
 # i.e. ZERO-SHOT VOICE CLONING from reference audio (needs ref_text), using
 # Qwen/Qwen3-TTS-12Hz-1.7B-Base. It is a member of the broadcaster-pipeline group,
@@ -376,7 +423,16 @@ RUN mkdir -p /app \
 # The model on the PVC is HF-format (/models/hub/models--Qwen--Qwen3-TTS-12Hz-1.7B-Base)
 # plus /models/tts-voices; audio.cpp is ggml and wants its own package layout, so
 # migrating is a model CONVERSION, not a config edit. Keep both present to A/B it.
-ARG INCLUDE_QWEN3TTS=true
+#
+# 2026-11-21: DEFAULT FLIPPED TO false. The 6000 retired Qwen3-TTS on
+# 2026-10-06 and serves clones through audio.cpp (VoxCPM2, OmniVoice, Higgs).
+# ⚠ THE 5000 STILL REFERENCES THE VENV: manual/llama-swap/configmap.yaml has
+# qwen3-tts:1.7b-clone -> /app/qwen3tts-venv/bin/python, in the
+# broadcaster-pipeline group, and broadcaster prod+dev default AI_TTS_MODEL to
+# it against llama.public.krystof.io. With this image that entry cannot start.
+# Either repoint broadcaster at an audio.cpp entry, or build with
+# --build-arg INCLUDE_QWEN3TTS=true to get the old behaviour back.
+ARG INCLUDE_QWEN3TTS=false
 ARG TORCH_VERSION
 ARG TORCHAUDIO_VERSION
 ARG QWEN_TTS_VERSION

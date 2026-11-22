@@ -2,3 +2,4 @@
 # Globbed rather than enumerated: the previous per-directory list meant a new
 # Dockerfiles/<name>/.env was not ignored until someone remembered to add it.
 Dockerfiles/*/.env
+Dockerfiles/**/__pycache__/**

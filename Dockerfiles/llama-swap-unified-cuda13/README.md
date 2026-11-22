@@ -80,8 +80,10 @@ entry, no group member. It was a second full torch+torchaudio venv, ~4 GB, wired
 nothing. `orpheus_server.py` is not copied into this directory; it stays in git history
 with the old image.
 
-**Qwen3-TTS is kept, behind `INCLUDE_QWEN3TTS` (default `true`).** Not because it's
-better than audio.cpp, but because the live entry is:
+**Qwen3-TTS sits behind `INCLUDE_QWEN3TTS`, default `false` since 2026-11-21** (the
+venv is no longer built unless you pass `--build-arg INCLUDE_QWEN3TTS=true`). It was
+kept on until then, not because it's better than audio.cpp, but because of this entry,
+which still exists on the 5000 and cannot start on a default build:
 
 ```yaml
 "qwen3-tts:1.7b-clone":
