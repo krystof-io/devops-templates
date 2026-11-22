@@ -1,4 +1,5 @@
-# AVTR-1 — Avaturn open-weights real-time talking-head model (offline workbench)
+# AVTR-1 — Avaturn open-weights real-time talking-head model
+# (renderer + WebRTC streamer + local conversation engine; one image, one pod)
 # https://github.com/avaturn-live/avtr-1
 #
 # Everything that can be pinned is pinned, because the whole point of this image
@@ -15,8 +16,15 @@
 # No weights and no tokens are baked in. Artifacts live on the PVC at /data.
 #
 # Build (hand-built, like the other GPU images):
-#   docker build -t docker-private.privpub.krystof.io/krystof-io/avtr1:eb1e5a8 .
-#   docker push docker-private.privpub.krystof.io/krystof-io/avtr1:eb1e5a8
+#   docker build -t docker-private.privpub.krystof.io/krystof-io/avtr1:eb1e5a8-11 .
+#   docker push docker-private.privpub.krystof.io/krystof-io/avtr1:eb1e5a8-11
+# Tag = upstream commit + build number; bump the number whenever this file or
+# anything under live/ changes. (Builds 1-10 were tagged eb1e5a8-live1..-live10;
+# plain eb1e5a8 was the first, renderer-only image.)
+#
+# What the pod runs:   pixi run -e streamer python scripts/run_local_stream.py
+# Offline work in it:  kubectl exec ... pixi run -e renderer ...
+# (default CMD is sleep infinity, for first-time setup on an empty volume)
 
 # The lock is a CUDA 12 stack (torch 2.7.1+cu128, tensorrt_cu12 10.11, nvcc 12.9).
 # torch's wheels bundle their own CUDA 12.8 runtime + cuDNN 9.7; the base supplies
@@ -115,14 +123,62 @@ RUN set -eu; sp=.pixi/envs/renderer/lib/python3.12/site-packages; \
 RUN pixi list --frozen -e renderer > /opt/avtr-1/installed-packages.txt \
     && pixi clean cache --yes || true
 
-# Runtime defaults: artifacts on the PVC, no Hub access, no STUN, never re-solve.
+# ---------------------------------------------------------------------------
+# Live streaming (WebRTC) layer. Everything above is the offline renderer and
+# is unchanged; everything from here to the runtime defaults is the spike that
+# serves the browser demo at avatar-test.public.krystof.io.
+# ---------------------------------------------------------------------------
+
+# Second pixi environment from the same upstream lock: aiortc, fastapi, uvicorn
+# and friends (78 packages, audited 2026-11-21, no sdists, every hash locked).
+RUN pixi install --frozen -e streamer \
+    && pixi list --frozen -e streamer > /opt/avtr-1/installed-packages-streamer.txt \
+    && pixi clean cache --yes || true
+
+# The demo page imports Preact and htm from the esm.sh CDN. Serve them from
+# this image instead, taken from the npm registry tarballs and checked against
+# their sha256 (the tarballs also match the registry's published sha512
+# integrity values as of 2026-11-21).
+ARG PREACT_TGZ_SHA256=0e4ff39b2a63f38a860205485efecfd4025d52d51cc139b8f70f9fa3abe15479
+ARG HTM_TGZ_SHA256=2425b9bee11409177bcabc7f32e319926fc6690c1701c0b257c88bdff2d5ba90
+RUN set -eu; mkdir -p /opt/avtr-1/vendor /tmp/v; cd /tmp/v; \
+    curl -fsSL -o preact.tgz https://registry.npmjs.org/preact/-/preact-10.22.0.tgz; \
+    curl -fsSL -o htm.tgz https://registry.npmjs.org/htm/-/htm-3.1.1.tgz; \
+    echo "${PREACT_TGZ_SHA256}  preact.tgz" | sha256sum -c -; \
+    echo "${HTM_TGZ_SHA256}  htm.tgz" | sha256sum -c -; \
+    tar -xzf preact.tgz package/dist/preact.module.js package/hooks/dist/hooks.module.js package/LICENSE; \
+    cp package/dist/preact.module.js package/hooks/dist/hooks.module.js /opt/avtr-1/vendor/; \
+    cp package/LICENSE /opt/avtr-1/vendor/preact.LICENSE; rm -rf package; \
+    tar -xzf htm.tgz package/dist/htm.module.js package/LICENSE; \
+    cp package/dist/htm.module.js /opt/avtr-1/vendor/; cp package/LICENSE /opt/avtr-1/vendor/htm.LICENSE; \
+    cd /; rm -rf /tmp/v; \
+    echo "087942b6f43a74de6a3abb2e0c4e287f03b54b4849cfa34d312402f24aa34a30  /opt/avtr-1/vendor/preact.module.js" | sha256sum -c -; \
+    echo "f21e6237abd71b106ee38eb8f2b9207724231bf0c30e25bbf21a8b6269e3a926  /opt/avtr-1/vendor/hooks.module.js" | sha256sum -c -; \
+    echo "ab33dd3f38059b9be4d5f5350128eefb2356639c4e0bbe9d9e8b3ba75847e9e4  /opt/avtr-1/vendor/htm.module.js" | sha256sum -c -
+
+# Local code: a "type text, she says it" conversation engine, plus exact-match
+# patches to the streamer, its page, the launcher and aioice. See the docstring
+# in live/apply_patches.py for what each patch does and why. The repo package is
+# an editable install, so patching /opt/avtr-1/src is enough.
+COPY --chown=1000:1000 live/local_engine.py /opt/avtr-1/src/avaturn_live_streamer/conversation_engines/local_engine.py
+# Per-avatar tuning: a dependency-free settings module importable from both pixi
+# environments (src/ is on the path of the editable install), and the renderer-side
+# logic that applies those settings to the motion.
+COPY --chown=1000:1000 live/kio_required_env.py live/kio_avatar_settings.py live/kio_motion_tuning.py /opt/avtr-1/src/
+COPY --chown=1000:1000 live/apply_patches.py /opt/avtr-1/kio-apply-patches.py
+RUN .pixi/envs/streamer/bin/python -I kio-apply-patches.py /opt/avtr-1 \
+    && .pixi/envs/streamer/bin/python -c "import avaturn_live_streamer.local_stream_cli, aioice.ice; print('streamer imports ok')" \
+    && .pixi/envs/renderer/bin/python -c "import kio_motion_tuning, avtr1_renderer.pipeline; print('renderer imports ok')"
+
+# NO RUNTIME DEFAULTS. The image sets none of its runtime settings: storage
+# paths, ports, Hugging Face offline posture, pixi's frozen mode, and every
+# KIO_* value all come from the Kubernetes manifest. src/kio_required_env.py
+# lists them, and the live launcher and streamer refuse to start, naming what is
+# missing, if any is absent. (The two ENV lines above, CONDA_OVERRIDE_CUDA and
+# UV_BUILD_CONSTRAINT, are build-tool settings needed by `pixi install`; they
+# precede the environment layers, so removing them would force a full rebuild.)
+#
 # Always run tasks as `pixi run -e renderer <task>`: the lock also carries a
 # smaller `default` env that was not installed.
-ENV AVTR1_LOCAL_STORAGE=/data/artifacts \
-    HF_HOME=/data/hf \
-    HF_HUB_OFFLINE=1 \
-    HF_HUB_DISABLE_TELEMETRY=1 \
-    STUN_URL="" \
-    PIXI_FROZEN=true
 
 CMD ["sleep", "infinity"]
