@@ -350,6 +350,33 @@ CLI_ROUTES = '''    app = FastAPI()
 
         return await list_voices()
 
+    @app.post("/mode")
+    async def kio_mode(body: dict[str, object]) -> dict[str, object]:
+        """What the agent behind the avatar is doing, so she can show it (see kio_avatar_mode.py).
+
+        Body {"mode": "<name>"}; the names are the Hermes HUD's display states. The
+        renderer blends the avatar's pose for that mode in over a moment.
+        """
+        import kio_avatar_mode
+
+        try:
+            mode = kio_avatar_mode.set_mode(str(body.get("mode", "")))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"mode": mode, "has_pose": mode in kio_avatar_mode.POSE_MODES}
+
+    @app.get("/mode")
+    async def kio_mode_get() -> dict[str, object]:
+        """The current mode and the contract: every mode name, and which have a pose."""
+        import kio_avatar_mode
+
+        return {
+            "mode": kio_avatar_mode.get_mode(0.0),
+            "modes": list(kio_avatar_mode.MODES),
+            "pose_modes": list(kio_avatar_mode.POSE_MODES),
+            "pose_controls": [c[0] for c in kio_avatar_mode.POSE_CONTROLS],
+        }
+
     @app.get("/session")
     async def kio_session() -> dict[str, object]:
         """Whether a session is running, with which avatar, and which engine mode this pod runs."""
@@ -463,7 +490,8 @@ patch("src/avaturn_live_streamer/local_stream_cli.py", [
         "        chosen_background = body.background_id.strip()\n"
         "        if not chosen_background:\n"
         "            raise HTTPException(status_code=400, detail=\"background_id is required\")\n"
-        "        await _kio_set_video_shape(chosen_avatar, body)\n",
+        "        await _kio_set_video_shape(chosen_avatar, body)\n"
+        "        __import__(\"kio_avatar_mode\").set_mode(\"idle\")  # a new session starts with no pose\n",
         1,
     ),
     # One session at a time, but the newest request wins: starting a session on
@@ -726,6 +754,8 @@ SAY_BAR = '''  <div id="kio-say">
       <div class="kio-tune-head">
         <b>Tuning: <span id="kio-tune-avatar">…</span></b>
         <span class="kio-grow" id="kio-tune-status"></span>
+        <label class="kio-check" title="Hold her in a mode's pose while you tune it. The Hermes HUD sets this by itself from what the agent is doing.">Pose
+          <select id="kio-mode" style="width:auto;padding:4px 6px;font-size:12px"></select></label>
         <button class="kio-btn" id="kio-tune-show" type="button">Saved values</button>
         <button class="kio-btn" id="kio-tune-resetall" type="button">Reset all</button>
       </div>
@@ -1005,6 +1035,21 @@ SAY_BAR = '''  <div id="kio-say">
           if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function () { statusEl.textContent = "copied"; }, function () { statusEl.textContent = "select the text and copy it"; });
           else statusEl.textContent = "select the text and copy it";
         });
+        // Hold a mode, to see its pose while tuning it.
+        (function () {
+          var sel = document.getElementById("kio-mode");
+          fetch("/mode").then(function (r) { return r.json(); }).then(function (m) {
+            (m.modes || []).forEach(function (name) {
+              var o = document.createElement("option"); o.value = name;
+              o.textContent = name + ((m.pose_modes || []).indexOf(name) >= 0 ? "" : " (no pose)"); sel.appendChild(o);
+            });
+            sel.value = m.mode || "idle";
+          }).catch(function () {});
+          sel.addEventListener("change", function () {
+            fetch("/mode", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: sel.value }) })
+              .then(function (r) { statusEl.textContent = r.ok ? "pose: " + sel.value : "could not set the pose"; });
+          });
+        })();
         document.getElementById("kio-tune-resetall").addEventListener("click", function () {
           if (!schema || !avatar) return;
           if (!window.confirm("Reset every setting for " + avatar + " to its default?")) return;

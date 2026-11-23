@@ -15,6 +15,8 @@
 #      guidance vector with one number; here each slice gets its own multiplier.
 #   3. Gains on the generated motion: head rotation, and the brow / eyes / mouth
 #      expression groups, each scaled about the portrait's own value.
+#   4. Poses: a glance and a head movement for what the agent is doing (thinking,
+#      running a tool, listening, waiting), blended in on top. See kio_avatar_mode.py.
 
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import dataclasses
 import roma
 import torch
 
+import kio_avatar_mode as mode
 import kio_avatar_settings as settings
 from avtr1_renderer.constants import LIPSYNC_COORDS
 
@@ -68,6 +71,12 @@ def guidance_vector(key: str, value: float, avatar, latent_dim: int, device) -> 
 
 
 def apply_gains(motions, avatar) -> None:
+    """Called once per chunk from pipeline.py: the per-avatar gains, then the pose for the current mode."""
+    _apply_gains(motions, avatar)
+    apply_pose(motions, avatar)
+
+
+def _apply_gains(motions, avatar) -> None:
     """Scale the generated motion in place, about the portrait's own pose and expression."""
     saved = settings.overrides(avatar.id)
     if not any(k.startswith("gain.") for k in saved):
@@ -94,6 +103,77 @@ def apply_gains(motions, avatar) -> None:
         gain[_EYELID_COLS] *= lids
     if bool((gain != 1.0).any()):
         motions.exp[:] = src_all + gain * (motions.exp - src_all)
+
+
+# ---- poses: what she does while the agent thinks, runs a tool, listens or waits -----
+#
+# kio_avatar_mode holds the contract (the mode names and the pose controls). Here a
+# pose becomes offsets on the generated motion: the gaze through four of the eye
+# keypoints, the head through a small extra rotation. The gaze numbers are the
+# LivePortrait project's own "eyeball direction" retargeting (this renderer is of
+# that family); tried on this model on 2026-11-23, where gaze up, gaze aside and the
+# head offsets read clearly, gaze down read as half-closed, and its brow control did
+# next to nothing (so there is none here).
+#
+# The renderer is stateless per chunk, but easing into a pose needs memory, so the
+# pose in effect is kept here between chunks. One session at a time, so one pose.
+
+_POSE_KEYS = tuple(c[0] for c in mode.POSE_CONTROLS)  # gaze_x, gaze_y, head_pitch, head_yaw, head_roll
+_FRAME_MS = 40.0  # 25 frames a second
+_pose_now = [0.0] * len(_POSE_KEYS)
+_pose_avatar = ""
+
+
+def _col(keypoint: int, axis: int) -> int:
+    return _COORDS.index(keypoint * 3 + axis)
+
+
+def pose_target(avatar_id: str, current_mode: str) -> list[float]:
+    """The pose this avatar should move towards in this mode: its tuned values times its strength."""
+    if current_mode not in mode.POSE_MODES:
+        return [0.0] * len(_POSE_KEYS)
+    strength = float(settings.get(avatar_id, "pose.strength"))
+    return [strength * float(settings.get(avatar_id, f"pose.{current_mode}.{k}")) for k in _POSE_KEYS]
+
+
+def apply_pose(motions, avatar) -> None:
+    """Blend the current mode's pose into the generated motion, in place, frame by frame."""
+    global _pose_avatar
+    if avatar.id != _pose_avatar:  # another avatar: start from no pose rather than the last one's
+        _pose_avatar = avatar.id
+        _pose_now[:] = [0.0] * len(_POSE_KEYS)
+    target = pose_target(avatar.id, mode.get_mode())
+    if not any(target) and not any(abs(v) > 1e-3 for v in _pose_now):
+        return
+    blend_ms = max(float(settings.get(avatar.id, "pose.blend_ms")), _FRAME_MS)
+    step = min(1.0, _FRAME_MS / blend_ms * 3.0)  # an exponential approach, about done in blend_ms
+    n = motions.exp.shape[0]
+    frames = []
+    for _ in range(n):
+        for i, t in enumerate(target):
+            _pose_now[i] += (t - _pose_now[i]) * step
+        frames.append(list(_pose_now))
+    p = torch.tensor(frames, device=motions.exp.device, dtype=motions.exp.dtype)  # (n, 5)
+    gx, gy = p[:, 0], p[:, 1]
+    # Gaze: LivePortrait's eyeball-direction mapping onto keypoints 11, 13, 15 and 16.
+    right = torch.where(gx > 0, 0.0007, 0.001)
+    left = torch.where(gx > 0, 0.001, 0.0007)
+    lid = -gy / 2.0
+    motions.exp[:, _col(11, 0)] += gx * right
+    motions.exp[:, _col(15, 0)] += gx * left
+    motions.exp[:, _col(11, 1)] += gy * -0.001 + lid * -0.001
+    motions.exp[:, _col(15, 1)] += gy * -0.001 + lid * -0.001
+    motions.exp[:, _col(13, 1)] += lid * 0.0003
+    motions.exp[:, _col(16, 1)] += lid * 0.0003
+    # Head: a small extra rotation in front of the generated one.
+    if bool((p[:, 2:].abs() > 1e-4).any()):
+        rad = torch.deg2rad(p[:, 2:])
+        pitch, yaw, roll = rad[:, 0], rad[:, 1], rad[:, 2]
+        zero, one = torch.zeros_like(pitch), torch.ones_like(pitch)
+        rx = torch.stack([one, zero, zero, zero, pitch.cos(), -pitch.sin(), zero, pitch.sin(), pitch.cos()], dim=1).reshape(n, 3, 3)
+        ry = torch.stack([yaw.cos(), zero, yaw.sin(), zero, one, zero, -yaw.sin(), zero, yaw.cos()], dim=1).reshape(n, 3, 3)
+        rz = torch.stack([roll.cos(), -roll.sin(), zero, roll.sin(), roll.cos(), zero, zero, zero, one], dim=1).reshape(n, 3, 3)
+        motions.R[:] = (rz @ ry @ rx) @ motions.R
 
 
 _face_boxes: dict[str, dict | None] = {}

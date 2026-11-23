@@ -163,7 +163,7 @@ COPY --chown=1000:1000 live/local_engine.py /opt/avtr-1/src/avaturn_live_streame
 # Per-avatar tuning: a dependency-free settings module importable from both pixi
 # environments (src/ is on the path of the editable install), and the renderer-side
 # logic that applies those settings to the motion.
-COPY --chown=1000:1000 live/kio_required_env.py live/kio_avatar_settings.py live/kio_motion_tuning.py /opt/avtr-1/src/
+COPY --chown=1000:1000 live/kio_required_env.py live/kio_avatar_settings.py live/kio_motion_tuning.py live/kio_avatar_mode.py /opt/avtr-1/src/
 # Text supplied from outside (the Hermes HUD): cleaning it for speech, and the
 # per-session crop/size of the picture. Both are tested at build.
 COPY --chown=1000:1000 live/kio_speech_text.py live/kio_video_shape.py live/test_speech_text.py live/test_video_shape.py /opt/avtr-1/src/

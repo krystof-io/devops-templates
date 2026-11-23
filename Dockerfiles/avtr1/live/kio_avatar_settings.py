@@ -26,6 +26,8 @@ import os
 import tempfile
 import time
 
+import kio_avatar_mode as _mode
+
 REGIONS = ("head", "brow", "eyes", "mouth")
 
 # (key, label, group, kind, default, min, max, step, help)
@@ -68,6 +70,18 @@ _FIELDS += [
      "Extra multiplier on the two eyelid values, on top of the eyes gain. Raise it if she never fully blinks."),
     ("gain.mouth", "Mouth", "Gains", _NUM, 1.0, 0.0, 3.0, 0.05,
      "Scales mouth movement away from the portrait's own expression."),
+    # --- poses: what she does while the agent thinks, runs a tool, listens or waits ----
+    # (the modes and controls are defined once, in kio_avatar_mode.py)
+    ("pose.strength", "Pose strength", "Poses", _NUM, 1.0, 0.0, 2.0, 0.05,
+     "Scales every pose at once. 0 turns poses off for this avatar."),
+    ("pose.blend_ms", "Pose blend time (ms)", "Poses", _NUM, 400, 80, 2000, 20,
+     "How long she takes to move into a pose and back out of it."),
+    *[
+        (f"pose.{_m}.{_c}", f"{_m.capitalize()}: {_label}", "Poses", _NUM,
+         _mode.POSE_DEFAULTS.get(_m, {}).get(_c, 0.0), _lo, _hi, _step, f"While the agent is {_m}. {_help}")
+        for _m in _mode.POSE_MODES
+        for (_c, _label, _lo, _hi, _step, _help) in _mode.POSE_CONTROLS
+    ],
     # --- conversation (used by the local conversation engine) ------------------------
     ("vad_end_ms", "Pause before she answers (ms)", "Conversation", _NUM, 700, 200, 2500, 50,
      "How long you must be quiet before your turn is considered finished."),

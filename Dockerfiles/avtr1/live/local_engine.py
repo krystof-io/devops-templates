@@ -67,6 +67,7 @@ from avaturn_live_streamer.events import (
 )
 from avaturn_live_streamer.speech.speech_buffer import SpeechBuffer
 
+import kio_avatar_mode as _mode  # what the agent is doing, for the avatar's pose
 import kio_avatar_settings as _settings  # per-avatar tuning, shared with the renderer
 import kio_required_env as _required  # every setting comes from Kubernetes; no defaults in the image
 from kio_speech_text import SpeechText, split_sentences as _split_sentences
@@ -184,6 +185,14 @@ _session_avatar = ""
 def set_session_avatar(avatar_id: str) -> None:
     global _session_avatar
     _session_avatar = avatar_id
+
+
+def _set_mode(mode: str) -> None:
+    """Tell the renderer what is going on, for the avatar's pose. Never worth failing over."""
+    try:
+        _mode.set_mode(mode)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("could not set the avatar mode", mode=mode, error=str(exc))
 
 
 def _tuned(key: str):
@@ -401,6 +410,7 @@ class LocalEngine:
     async def _reply(self, bus: EventBus, user_text: str, *, t_heard: float, stt_s: float | None) -> None:
         """LLM -> TTS for one user turn. Cancelled on barge-in."""
         self._generating = True
+        _set_mode("thinking")  # this engine's own loop: the LLM is working
         spoken: list[str] = []
         t0 = time.monotonic()
         first_sentence_s: float | None = None
@@ -409,6 +419,7 @@ class LocalEngine:
             async for sentence in self._llm_sentences(user_text):
                 if first_sentence_s is None:
                     first_sentence_s = time.monotonic() - t0
+                    _set_mode("speaking")
                 spoken.append(sentence)
                 tts_first = await self._speak(bus, sentence)
                 if first_audio_s is None and tts_first is not None:
@@ -421,6 +432,7 @@ class LocalEngine:
             _note("system", f"reply failed: {exc}")
         finally:
             self._generating = False
+            _set_mode("idle")
             reply = " ".join(spoken)
             self._history.append({"role": "user", "content": user_text})
             if reply:
@@ -449,14 +461,27 @@ class LocalEngine:
         t0: float | None = None
         first_audio_s: float | None = None
         try:
+            idle_since: float | None = None  # nothing left to say, waiting for more text
             while True:
+                if stream.text.empty() and spoken and idle_since is None:
+                    idle_since = time.monotonic()
                 piece = await stream.text.get()
                 if t0 is None:
                     t0 = time.monotonic()
                 for sentence in (prep.flush() if piece is None else prep.feed(piece)):
+                    # Why she went quiet mid-reply, for the log: the text stopped coming (the
+                    # agent was thinking or running a tool), or the voice fell behind.
+                    if idle_since is not None and time.monotonic() - idle_since > 3.0:
+                        _LOGGER.info("reply resumed after a wait for text", waited_s=round(time.monotonic() - idle_since, 1),
+                                     sentences_so_far=len(spoken))
+                    idle_since = None
                     stream.emit("spoken", text=sentence)
                     spoken.append(sentence)
+                    t_tts = time.monotonic()
                     tts_first = await self._speak(bus, sentence)
+                    if time.monotonic() - t_tts > 6.0:
+                        _LOGGER.warning("slow speech synthesis", took_s=round(time.monotonic() - t_tts, 1),
+                                        first_audio_s=_r(tts_first), chars=len(sentence), sentence_no=len(spoken))
                     if first_audio_s is None and tts_first is not None:
                         first_audio_s = time.monotonic() - t0
                 if piece is None:
@@ -569,6 +594,7 @@ class LocalEngine:
                                 continue
                             await self._interrupt(bus, "user started speaking")
                         in_speech, quiet_ms, speech_ms = True, 0.0, loud_ms
+                        _set_mode("listening")
                         speech = list(preroll)
                         preroll.clear()
                     continue
@@ -581,6 +607,7 @@ class LocalEngine:
 
                 # End of utterance.
                 in_speech, loud_ms = False, 0.0
+                _set_mode("idle")
                 audio = np.concatenate(speech)
                 speech = []
                 voiced_ms = speech_ms - quiet_ms
@@ -689,6 +716,7 @@ class LocalEngine:
                 self._stream.emit("end", stopped=True)  # the session is gone
             while not self._stream_ops.empty():  # replies that arrived as the session was ending
                 self._stream_ops.get_nowait()[1].emit("end", stopped=True)
+            _set_mode("idle")  # no pose left behind for the next session
             if _active is self:
                 _active = None
             _note("system", "session ended")
