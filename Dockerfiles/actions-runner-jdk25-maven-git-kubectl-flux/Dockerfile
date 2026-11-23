@@ -6,28 +6,30 @@ FROM ghcr-proxy.private.krystof.io/actions/actions-runner:${RUNNER_VERSION}
 
 # Define versions for easy maintenance
 # https://adoptium.net/temurin/releases
-# Temurin version:  25.0.1+8
-# Package version:  25.0.1.0.0+8-0
-#                   │  │ │ │ │ │ └─ Package revision (Debian/Ubuntu packaging)
-#                   │  │ │ │ │ └─── Build number (from Temurin)
-#                   │  │ │ │ └───── Extra field (unused, set to 0)
-#                   │  │ │ └─────── Micro version (unused, set to 0)
-#                   │  │ └───────── Patch version (1)
-#                   │  └──────────── Minor version (0)
-#                   └─────────────── Major version (25)
+# Temurin version:  25.0.5.1+2 (Java4Shell CVE-2026-114938 fix)
+# Package version:  25.0.5.1.0+2-0
+#                   │  │ │ │ │ └─ Package revision (Debian/Ubuntu packaging)
+#                   │  │ │ │ └─── Build number (from Temurin)
+#                   │  │ │ └───── Extra field (unused, set to 0)
+#                   │  │ └─────── Micro version (used by Nov-2026 out-of-band patches, e.g. .1)
+#                   │  └───────── Patch version
+#                   └───────────── Major.Minor version
+# Discover the current package version:
+#   curl -s https://packages.adoptium.net/artifactory/deb/dists/noble/main/binary-amd64/Packages.gz \
+#     | gunzip | grep -A1 'Package: temurin-25-jdk' | grep Version
 
-ARG JDK_VERSION=25.0.1.0.0+8-0
+ARG JDK_VERSION=25.0.5.1.0+2-0
 # https://maven.apache.org/download.cgi
-ARG MAVEN_VERSION=3.9.12
+ARG MAVEN_VERSION=3.9.16
 # https://github.com/mikefarah/yq/releases
-ARG YQ_VERSION=4.50.1
+ARG YQ_VERSION=4.54.3
 # https://github.com/kubernetes/kubernetes/releases
 # https://dl.k8s.io/release/stable.txt
-ARG KUBECTL_VERSION=1.35.0
+ARG KUBECTL_VERSION=1.37.2
 # https://github.com/fluxcd/flux2/releases
-ARG FLUX_VERSION=2.7.5
+ARG FLUX_VERSION=2.10.1
 # https://github.com/cli/cli/releases
-ARG GH_CLI_VERSION=2.83.2
+ARG GH_CLI_VERSION=2.105.0
 # https://github.com/nodesource/distributions
 ARG NODE_MAJOR_VERSION=22
 
