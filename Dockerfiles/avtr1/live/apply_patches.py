@@ -1162,6 +1162,21 @@ patch("scripts/run_local_stream.py", [
 #   - guidance_vector:  per-region guidance (head / brow / eyes / mouth)
 #   - apply_gains:      head, brow, eyes, eyelids and mouth gains on the result
 patch("src/avtr1_renderer/pipeline.py", [
+    # Every PNG in reference_frames is registered when the renderer starts, and one that
+    # cannot be (no face found, unreadable file) stops it starting. That is left as it is,
+    # but upstream's error ("No face detected in source image.") does not say WHICH file,
+    # and portraits are now uploaded through a file browser. Name it, in the pod log.
+    (
+        "            registry[avatar_id] = loader.load(portrait, avatar_id=avatar_id)\n",
+        "            try:\n"
+        "                registry[avatar_id] = loader.load(portrait, avatar_id=avatar_id)\n"
+        "            except Exception as exc:  # local addition: say which portrait\n"
+        "                raise RuntimeError(\n"
+        "                    f\"BAD PORTRAIT: could not register {portrait} as avatar '{avatar_id}': \"\n"
+        "                    f\"{type(exc).__name__}: {exc} Fix or remove that file, then restart the pod.\"\n"
+        "                ) from exc\n",
+        1,
+    ),
     (
         'TRANSPARENT_BG_ID = "transparent"\n',
         'TRANSPARENT_BG_ID = "transparent"\n\nimport kio_motion_tuning as _kio_tuning  # local addition\n',
