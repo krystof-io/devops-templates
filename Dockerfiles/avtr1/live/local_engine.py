@@ -16,6 +16,17 @@
 # discards her queued speech. Typed input still works through POST /say:
 # mode "say" speaks the text verbatim, mode "ask" sends it to the LLM as if spoken.
 #
+# Two modes, chosen per deployment with KIO_ENGINE:
+#   "conversation"  everything above (the test page).
+#   "text-in"       no speech-to-text and no LLM here: another program supplies
+#                   the words. The Hermes HUD sends Hermes' reply text to
+#                   WS /speak-stream as it arrives; this engine cleans it for
+#                   speech (kio_speech_text), speaks it sentence by sentence and
+#                   reports when speech starts and ends. The microphone still
+#                   reaches the renderer as the listen track (the streamer does
+#                   that itself), so the avatar reacts while the user talks.
+# /speak-stream works in both modes.
+#
 # Everything tunable is an environment variable set in the Deployment, so the
 # usual adjustments need a pod restart, not an image rebuild. There are no
 # defaults in this file: see kio_required_env.py.
@@ -58,6 +69,7 @@ from avaturn_live_streamer.speech.speech_buffer import SpeechBuffer
 
 import kio_avatar_settings as _settings  # per-avatar tuning, shared with the renderer
 import kio_required_env as _required  # every setting comes from Kubernetes; no defaults in the image
+from kio_speech_text import SpeechText, split_sentences as _split_sentences
 
 _LOGGER = get_logger()
 
@@ -68,6 +80,11 @@ _LOGGER = get_logger()
 # this module can still be imported by the image build's import test.
 _cfg = _required.text
 _num = _required.number
+
+# "conversation" or "text-in" (see the header). In text-in mode the speech-to-text,
+# LLM and turn-taking settings below are not required and read as empty/zero.
+ENGINE_MODE = _cfg("KIO_ENGINE")
+CONVERSATION = ENGINE_MODE == "conversation"
 
 # --- text-to-speech -----------------------------------------------------------
 TTS_URL = _cfg("KIO_TTS_URL")
@@ -154,10 +171,11 @@ BARGE_IN_START_MS = _num("KIO_BARGE_IN_START_MS", int)
 
 # The four conversation settings above are also adjustable per avatar from the
 # tuning panel. Their defaults there are this pod's environment values.
-_settings.set_default("vad_end_ms", VAD_END_MS)
-_settings.set_default("barge_in", BARGE_IN)
-_settings.set_default("barge_in_factor", BARGE_IN_FACTOR)
-_settings.set_default("llm_max_tokens", LLM_MAX_TOKENS)
+if CONVERSATION:
+    _settings.set_default("vad_end_ms", VAD_END_MS)
+    _settings.set_default("barge_in", BARGE_IN)
+    _settings.set_default("barge_in_factor", BARGE_IN_FACTOR)
+    _settings.set_default("llm_max_tokens", LLM_MAX_TOKENS)
 
 # Avatar of the current session (one session at a time), set by the /offer route.
 _session_avatar = ""
@@ -175,7 +193,6 @@ def _tuned(key: str):
 
 # Whisper's usual outputs for silence or noise; not worth a reply.
 _STT_JUNK = re.compile(r"^[\s\[\(]*(blank_audio|silence|music|no speech|inaudible|applause)[\s\]\)]*$", re.I)
-_SENTENCE_END = re.compile(r"([.!?…]+[\"')\]]*)(\s+|$)")
 
 
 class LocalEngineOptions(BaseModel):
@@ -198,6 +215,11 @@ def active_engine() -> "LocalEngine | None":
     return _active
 
 
+def session_info() -> dict[str, object]:
+    """What a client needs to know before sending speech here."""
+    return {"active": _active is not None, "engine": ENGINE_MODE, "avatar": _session_avatar if _active is not None else ""}
+
+
 def transcript_entries() -> list[dict[str, object]]:
     return list(_transcript)
 
@@ -216,23 +238,37 @@ def _wav_bytes(pcm16: np.ndarray, sample_rate: int) -> bytes:
     return buf.getvalue()
 
 
-def _split_sentences(text: str, *, final: bool) -> tuple[list[str], str]:
-    """Return (complete sentences, remainder). Short fragments ride with the next one."""
-    out: list[str] = []
-    start = 0
-    for m in _SENTENCE_END.finditer(text):
-        end = m.end(1)
-        piece = text[start:end].strip()
-        if len(piece) < 12 and not final:
-            continue  # "Yes." / "Hi!" — wait and send with what follows
-        if piece:
-            out.append(piece)
-        start = m.end()
-    rest = text[start:]
-    if final and rest.strip():
-        out.append(rest.strip())
-        rest = ""
-    return out, rest
+class SpeakStream:
+    """One reply's worth of text arriving from outside (WS /speak-stream).
+
+    The route feeds text in and reads events out; the engine does the speaking.
+    Events: {"type": "spoken", "text": ...} as each sentence goes to the voice,
+    {"type": "start"} when the first of it is actually heard, and
+    {"type": "end"} when all of it has been played (with "stopped": true if it
+    was cut short).
+    """
+
+    def __init__(self) -> None:
+        self.text: asyncio.Queue[str | None] = asyncio.Queue()
+        self.events: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        self.started = False
+        self.ended = False
+
+    def feed(self, piece: str) -> None:
+        if not self.ended:
+            self.text.put_nowait(piece)
+
+    def finish(self) -> None:
+        """No more text is coming; speak what is left."""
+        if not self.ended:
+            self.text.put_nowait(None)
+
+    def emit(self, type_: str, **extra: object) -> None:
+        if self.ended:
+            return
+        if type_ == "end":
+            self.ended = True
+        self.events.put_nowait({"type": type_, **extra})
 
 
 class LocalEngine:
@@ -244,11 +280,26 @@ class LocalEngine:
         self._playing: set[str] = set()  # segments the renderer says are being spoken
         self._generating = False  # a reply is being produced (LLM and/or TTS)
         self._http: httpx.AsyncClient | None = None
+        # Text supplied from outside (WS /speak-stream).
+        self._stream_ops: asyncio.Queue[tuple[str, SpeakStream]] = asyncio.Queue()
+        self._stream: SpeakStream | None = None  # the reply being spoken now
+        self._unplayed: set[str] = set()  # segments generated but not yet finished playing
 
     # ---- called from the /say route -------------------------------------------
     def enqueue(self, text: str, *, interrupt: bool = False, mode: str = "say") -> None:
         """Raises asyncio.QueueFull if backed up."""
         self._typed.put_nowait((text, mode, interrupt))
+
+    # ---- called from the /speak-stream route -------------------------------------
+    def open_stream(self) -> SpeakStream:
+        """Start a new reply. A reply still being spoken is cut off: the newest wins."""
+        stream = SpeakStream()
+        self._stream_ops.put_nowait(("open", stream))
+        return stream
+
+    def stop_stream(self, stream: SpeakStream) -> None:
+        """Stop speaking this reply and discard what is queued."""
+        self._stream_ops.put_nowait(("stop", stream))
 
     # ---- speaking ---------------------------------------------------------------
     @property
@@ -294,6 +345,7 @@ class LocalEngine:
                     if not started:
                         started = True
                         first_audio = time.monotonic() - t0
+                        self._unplayed.add(segment_id)
                         await bus.publish(SegmentGenerationStarted(segment_id=segment_id))
                     await bus.publish(SegmentChunkGenerated(segment_id=segment_id, buffer=self._buffer(chunk)))
             usable = len(pending) - (len(pending) % 2)
@@ -301,6 +353,7 @@ class LocalEngine:
                 if not started:
                     started = True
                     first_audio = time.monotonic() - t0
+                    self._unplayed.add(segment_id)
                     await bus.publish(SegmentGenerationStarted(segment_id=segment_id))
                 await bus.publish(SegmentChunkGenerated(segment_id=segment_id, buffer=self._buffer(pending[:usable])))
         except httpx.HTTPError as exc:
@@ -387,18 +440,67 @@ class LocalEngine:
         finally:
             self._generating = False
 
+    async def _speak_stream(self, bus: EventBus, stream: SpeakStream) -> None:
+        """Speak text that arrives from outside, sentence by sentence, as it arrives."""
+        self._generating = True
+        self._stream = stream
+        prep = SpeechText()
+        spoken: list[str] = []
+        t0: float | None = None
+        first_audio_s: float | None = None
+        try:
+            while True:
+                piece = await stream.text.get()
+                if t0 is None:
+                    t0 = time.monotonic()
+                for sentence in (prep.flush() if piece is None else prep.feed(piece)):
+                    stream.emit("spoken", text=sentence)
+                    spoken.append(sentence)
+                    tts_first = await self._speak(bus, sentence)
+                    if first_audio_s is None and tts_first is not None:
+                        first_audio_s = time.monotonic() - t0
+                if piece is None:
+                    break
+            self._generating = False
+            # All of it has been generated; "end" means all of it has been heard.
+            waited = 0.0
+            while self._unplayed and waited < 180.0:
+                await asyncio.sleep(0.05)
+                waited += 0.05
+            stream.emit("end")
+        except asyncio.CancelledError:
+            stream.emit("end", stopped=True)
+            _note("system", "(interrupted)")
+            raise
+        except Exception as exc:  # noqa: BLE001 - keep the session alive, show the cause
+            _LOGGER.error("speak-stream failed", error=str(exc))
+            _note("system", f"speech failed: {exc}")
+            stream.emit("end", error=str(exc))
+        finally:
+            self._generating = False
+            if self._stream is stream:
+                self._stream = None
+            if spoken:
+                text = " ".join(spoken)
+                _note("avatar", text, name=_session_avatar, streamed=True, text_to_first_audio_s=_r(first_audio_s))
+                _LOGGER.info("spoke", chars=len(text), sentences=len(spoken), text_to_first_audio_s=_r(first_audio_s),
+                             text=text[:120])
+
     async def _interrupt(self, bus: EventBus, reason: str) -> None:
         was_busy = self._she_is_speaking
         if self._turn is not None and not self._turn.done():
             self._turn.cancel()
-            try:
-                await self._turn
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
+            # asyncio.wait, not `await self._turn` inside try/except CancelledError: that
+            # form also swallows a cancellation of THIS worker (the session ending while it
+            # waits here), after which the worker carries on, the session never finishes,
+            # and every later session is refused with "Previous session did not stop in
+            # time". Seen 2026-11-23 when two devices kept taking the avatar from each other.
+            await asyncio.wait({self._turn})
         if was_busy:
             _LOGGER.info("interrupting avatar", reason=reason)
             await bus.publish(DiscardAvatarSpeechBuffer())
         self._playing.clear()
+        self._unplayed.clear()
 
     def _start_turn(self, coro) -> None:
         self._turn = asyncio.create_task(coro, name="LocalEngine.turn")
@@ -508,15 +610,27 @@ class LocalEngine:
             if interrupt or mode == "ask":
                 await self._interrupt(bus, "typed input")
             elif self._turn is not None and not self._turn.done():
-                try:
-                    await self._turn  # queue behind whatever she is saying
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                    pass
+                await asyncio.wait({self._turn})  # queue behind whatever she is saying
+            if mode == "ask" and not CONVERSATION:
+                _note("system", "this deployment has no LLM (text-in mode); typed questions are not available")
+                continue
             if mode == "ask":
                 _note("you", text, typed=True)
                 self._start_turn(self._reply(bus, text, t_heard=time.monotonic(), stt_s=None))
             else:
                 self._start_turn(self._say_verbatim(bus, text))
+
+    async def _stream_worker(self, bus: EventBus) -> None:
+        bus.ready()
+        while True:
+            op, stream = await self._stream_ops.get()
+            if op == "open":
+                await self._interrupt(bus, "new reply")  # the newest reply wins
+                self._start_turn(self._speak_stream(bus, stream))
+            elif stream is self._stream:
+                await self._interrupt(bus, "reply stopped")
+            else:
+                stream.emit("end", stopped=True)  # never started, or already over
 
     async def _playback_worker(self, bus: EventBus) -> None:
         """Track which segments the renderer is currently speaking."""
@@ -527,8 +641,12 @@ class LocalEngine:
             async for event in sub:
                 if isinstance(event, SegmentPlaybackStarted):
                     self._playing.add(str(event.segment_id))
+                    if self._stream is not None and not self._stream.started:
+                        self._stream.started = True
+                        self._stream.emit("start")
                 else:
                     self._playing.discard(str(event.segment_id))
+                    self._unplayed.discard(str(event.segment_id))
 
     async def _watch_shutdown(self, bus: EventBus, others: list[asyncio.Task[None]]) -> None:
         async with bus.subscribe(Shutdown) as sub:
@@ -543,8 +661,8 @@ class LocalEngine:
         global _active
         _ = clocks
         _active = self
-        _LOGGER.info("local engine started", avatar=_session_avatar, voice=self._config.voice, tts=TTS_URL, stt=STT_URL, llm=LLM_URL,
-                     llm_model=LLM_MODEL, barge_in=BARGE_IN, vad_end_ms=VAD_END_MS)
+        _LOGGER.info("local engine started", mode=ENGINE_MODE, avatar=_session_avatar, voice=self._config.voice, tts=TTS_URL,
+                     stt=STT_URL, llm=LLM_URL, llm_model=LLM_MODEL, barge_in=BARGE_IN, vad_end_ms=VAD_END_MS)
         _note("system", "session started")
         timeout = httpx.Timeout(connect=5.0, read=120.0, write=30.0, pool=5.0)
         try:
@@ -552,10 +670,12 @@ class LocalEngine:
                 self._http = http
                 async with TaskGroup() as tg:
                     workers = [
-                        tg.create_task(self._mic_worker(bus.clone()), name="LocalEngine._mic_worker"),
                         tg.create_task(self._typed_worker(bus.clone()), name="LocalEngine._typed_worker"),
+                        tg.create_task(self._stream_worker(bus.clone()), name="LocalEngine._stream_worker"),
                         tg.create_task(self._playback_worker(bus.clone()), name="LocalEngine._playback_worker"),
                     ]
+                    if CONVERSATION:  # text-in mode: no speech-to-text, no LLM
+                        workers.append(tg.create_task(self._mic_worker(bus.clone()), name="LocalEngine._mic_worker"))
                     tg.create_task(self._watch_shutdown(bus.clone(), workers), name="LocalEngine._watch_shutdown")
                     bus.ready()
         finally:
@@ -565,6 +685,10 @@ class LocalEngine:
             if self._turn is not None and not self._turn.done():
                 self._turn.cancel()
             self._http = None
+            if self._stream is not None:
+                self._stream.emit("end", stopped=True)  # the session is gone
+            while not self._stream_ops.empty():  # replies that arrived as the session was ending
+                self._stream_ops.get_nowait()[1].emit("end", stopped=True)
             if _active is self:
                 _active = None
             _note("system", "session ended")

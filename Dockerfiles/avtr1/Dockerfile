@@ -16,11 +16,10 @@
 # No weights and no tokens are baked in. Artifacts live on the PVC at /data.
 #
 # Build (hand-built, like the other GPU images):
-#   docker build -t docker-private.privpub.krystof.io/krystof-io/avtr1:eb1e5a8-11 .
-#   docker push docker-private.privpub.krystof.io/krystof-io/avtr1:eb1e5a8-11
-# Tag = upstream commit + build number; bump the number whenever this file or
-# anything under live/ changes. (Builds 1-10 were tagged eb1e5a8-live1..-live10;
-# plain eb1e5a8 was the first, renderer-only image.)
+#   docker build -t docker-private.privpub.krystof.io/krystof-io/avtr1:latest .
+#   docker push docker-private.privpub.krystof.io/krystof-io/avtr1:latest
+# The tag is only a label; the manifest pins the digest `docker push` prints
+# (kio-public-cluster manual/avtr1/deployment.yaml), and that digest is the version.
 #
 # What the pod runs:   pixi run -e streamer python scripts/run_local_stream.py
 # Offline work in it:  kubectl exec ... pixi run -e renderer ...
@@ -165,9 +164,14 @@ COPY --chown=1000:1000 live/local_engine.py /opt/avtr-1/src/avaturn_live_streame
 # environments (src/ is on the path of the editable install), and the renderer-side
 # logic that applies those settings to the motion.
 COPY --chown=1000:1000 live/kio_required_env.py live/kio_avatar_settings.py live/kio_motion_tuning.py /opt/avtr-1/src/
+# Text supplied from outside (the Hermes HUD): cleaning it for speech, and the
+# per-session crop/size of the picture. Both are tested at build.
+COPY --chown=1000:1000 live/kio_speech_text.py live/kio_video_shape.py live/test_speech_text.py live/test_video_shape.py /opt/avtr-1/src/
 COPY --chown=1000:1000 live/apply_patches.py /opt/avtr-1/kio-apply-patches.py
 RUN .pixi/envs/streamer/bin/python -I kio-apply-patches.py /opt/avtr-1 \
     && .pixi/envs/streamer/bin/python -c "import avaturn_live_streamer.local_stream_cli, aioice.ice; print('streamer imports ok')" \
+    && .pixi/envs/streamer/bin/python src/test_speech_text.py \
+    && .pixi/envs/streamer/bin/python src/test_video_shape.py \
     && .pixi/envs/renderer/bin/python -c "import kio_motion_tuning, avtr1_renderer.pipeline; print('renderer imports ok')"
 
 # NO RUNTIME DEFAULTS. The image sets none of its runtime settings: storage

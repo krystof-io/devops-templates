@@ -9,9 +9,12 @@ different aioice version) cannot leave a patch silently unapplied.
 
 What it changes, and why:
   1. conversation_engines/builders.py   register the "local" engine
-  2. local_stream_cli.py                /say and /transcript routes, /vendor route, advertise the
-                                        LoadBalancer address in the SDP answer,
-                                        longer idle timeout
+  2. local_stream_cli.py                /say, /speak-stream, /transcript, /session, /portrait,
+                                        /avatar-settings and /vendor routes, advertise the
+                                        LoadBalancer address in the SDP answer, session
+                                        takeover, per-session video shape, idle timeout
+  2.1 localrtc/worklet.py               crop/scale the picture per session (kio_video_shape.py)
+  2.2 avtr1_renderer/api/app.py         /avatar-geometry: where each avatar's face is
   3. local_stream_ui.html               load Preact/htm from this server instead
                                         of the esm.sh CDN, add the Local engine
                                         tab, the text/transcript bar, and a
@@ -96,6 +99,8 @@ CLI_HELPERS = '''_UI_HTML_PATH = Path(__file__).parent / "local_stream_ui.html"
 import os as _kio_os
 
 import kio_required_env as _kio_required  # no defaults in the image; see that module
+from fastapi import WebSocket as _KioWebSocket
+from fastapi import WebSocketDisconnect as _KioWsDisconnect
 from fastapi.responses import Response as _KioResponse
 
 _KIO_VENDOR_DIR = Path("/opt/avtr-1/vendor")
@@ -229,6 +234,28 @@ class _KioClientLog(BaseModel):
     events: list[dict] = []
 
 
+async def _kio_set_video_shape(avatar_id: str, body) -> None:
+    """Apply the shape/zoom/height a client asked for in its offer (see kio_video_shape.py)."""
+    import kio_video_shape
+    from avaturn_live_streamer.constant import VIDEO_RESOLUTION
+
+    face = None
+    if body.shape or body.zoom or body.height:
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=3.0) as http:
+                r = await http.get(f"{_renderer_base_url()}/avatar-geometry")
+                face = (r.json().get("avatars") or {}).get(avatar_id)
+        except Exception as exc:  # noqa: BLE001 - centre the crop instead
+            _LOGGER.warning("could not read avatar geometry; cropping around the centre", error=str(exc))
+    frame_h, frame_w = VIDEO_RESOLUTION
+    plan = kio_video_shape.set_session(
+        shape=body.shape, zoom=body.zoom, height=body.height, face=face, frame_w=frame_w, frame_h=frame_h
+    )
+    _LOGGER.info("video shape", shape=body.shape, zoom=body.zoom, height=body.height, face=face, plan=plan)
+
+
 class _KioSayBody(BaseModel):
     text: str
     interrupt: bool = False
@@ -323,6 +350,88 @@ CLI_ROUTES = '''    app = FastAPI()
 
         return await list_voices()
 
+    @app.get("/session")
+    async def kio_session() -> dict[str, object]:
+        """Whether a session is running, with which avatar, and which engine mode this pod runs."""
+        from avaturn_live_streamer.conversation_engines.local_engine import session_info
+
+        return session_info()
+
+    @app.get("/portrait/{avatar_id}")
+    async def kio_portrait(avatar_id: str) -> _KioResponse:
+        """The avatar's own portrait (the PNG it was registered from), for a still picture."""
+        if not avatar_id or len(avatar_id) > 80 or not all(c.isalnum() or c in "-_" for c in avatar_id):
+            raise HTTPException(status_code=400, detail="bad avatar id")
+        storage = Path(_kio_required.text("AVTR1_LOCAL_STORAGE"))
+        hits = sorted(storage.glob(f"*/avatars_artifacts/reference_frames/{avatar_id}.png"))
+        if not hits:
+            raise HTTPException(status_code=404, detail="no such avatar")
+        return _KioResponse(
+            content=hits[-1].read_bytes(), media_type="image/png", headers={"cache-control": "public, max-age=300"}
+        )
+
+    @app.websocket("/speak-stream")
+    async def kio_speak_stream(ws: _KioWebSocket) -> None:
+        """Speak text that another program supplies, as it arrives.
+
+        The protocol follows the Hermes agent's own /api/audio/speak-stream, so a
+        client can use either. Client sends {"text": "..."} pieces (raw markdown
+        is fine: it is cleaned for speech here), then {"done": true}; or
+        {"stop": true} to cut the speech off. Server sends
+        {"type": "spoken", "text": ...} per sentence, {"type": "start"} when the
+        first of it is heard, {"type": "end"} when all of it has been played, and
+        {"type": "fallback"} at once if there is no avatar session to speak
+        through, so the client can use its other voice. Sound and picture go over
+        the session's WebRTC connection, not this socket.
+        """
+        from avaturn_live_streamer.conversation_engines.local_engine import active_engine
+
+        await ws.accept()
+        engine = active_engine()
+        if engine is None:
+            await ws.send_json({"type": "fallback", "reason": "no avatar session is active"})
+            await ws.close()
+            return
+        stream = engine.open_stream()
+
+        async def _events() -> None:
+            while True:
+                event = await stream.events.get()
+                await ws.send_json(event)
+                if event.get("type") == "end":
+                    return
+
+        pump = asyncio.create_task(_events())
+        finished = False
+        try:
+            while not pump.done():
+                recv = asyncio.create_task(ws.receive_json())
+                done, _pending = await asyncio.wait({recv, pump}, return_when=asyncio.FIRST_COMPLETED)
+                if recv not in done:
+                    recv.cancel()
+                    break
+                msg = recv.result()
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("stop"):
+                    engine.stop_stream(stream)
+                elif msg.get("done"):
+                    finished = True
+                    stream.finish()
+                elif isinstance(msg.get("text"), str) and not finished:
+                    stream.feed(msg["text"][:8000])
+        except _KioWsDisconnect:
+            engine.stop_stream(stream)  # the client went away: do not keep talking to nobody
+        except Exception as exc:  # noqa: BLE001 - a malformed message ends this reply, not the session
+            _LOGGER.warning("speak-stream closed on an error", error=str(exc))
+            engine.stop_stream(stream)
+        finally:
+            pump.cancel()
+            try:
+                await ws.close()
+            except Exception:  # noqa: BLE001 - already closed
+                pass
+
     @app.get("/transcript")
     async def kio_transcript() -> dict[str, object]:
         """What was heard and said recently, with per-turn timings (local engine)."""
@@ -337,6 +446,26 @@ CLI_ROUTES = '''    app = FastAPI()
 patch("src/avaturn_live_streamer/local_stream_cli.py", [
     ('_UI_HTML_PATH = Path(__file__).parent / "local_stream_ui.html"\n', CLI_HELPERS, 1),
     ("    app = FastAPI()\n    slot = _SessionSlot()\n", CLI_ROUTES, 1),
+    # A client may ask for a cropped and/or smaller picture (kio_video_shape.py).
+    # Absent fields leave the picture as upstream sends it.
+    (
+        "    avatar_id: str\n    background_id: str\n",
+        "    avatar_id: str\n    background_id: str\n"
+        "    shape: Literal[\"wide\", \"square\", \"portrait\"] | None = None\n"
+        "    zoom: float | Literal[\"face\"] | None = None\n"
+        "    height: int | None = None\n",
+        1,
+    ),
+    (
+        "        chosen_background = body.background_id.strip()\n"
+        "        if not chosen_background:\n"
+        "            raise HTTPException(status_code=400, detail=\"background_id is required\")\n",
+        "        chosen_background = body.background_id.strip()\n"
+        "        if not chosen_background:\n"
+        "            raise HTTPException(status_code=400, detail=\"background_id is required\")\n"
+        "        await _kio_set_video_shape(chosen_avatar, body)\n",
+        1,
+    ),
     # One session at a time, but the newest request wins: starting a session on
     # another device ends the one still running elsewhere instead of being
     # refused with "Another session is active". KIO_SESSION_TAKEOVER=0 restores
@@ -399,6 +528,43 @@ patch("src/avaturn_live_streamer/local_stream_cli.py", [
         '    idle_timeout: Annotated[int, typer.Option(help="Idle timeout (s)")] = _kio_required.number(\n'
         '        "KIO_IDLE_TIMEOUT", int\n'
         "    ),\n",
+        1,
+    ),
+])
+
+# --- 2.1 per-session video shape -------------------------------------------------
+# The frame handed to the WebRTC encoder is built here; kio_video_shape crops and
+# scales it when the session asked for that. Transparent (stacked-alpha) output
+# is left alone: its frame is two pictures stacked and would need its own crop.
+patch("src/avaturn_live_streamer/localrtc/worklet.py", [
+    (
+        '    return av.VideoFrame.from_ndarray(arr, format="yuv420p")\n',
+        "    if pixel_format.has_alpha:\n"
+        '        return av.VideoFrame.from_ndarray(arr, format="yuv420p")\n'
+        "    import kio_video_shape\n"
+        "\n"
+        "    return kio_video_shape.build(arr)\n",
+        1,
+    ),
+])
+
+# --- 2.2 renderer: where each avatar's face is -----------------------------------
+patch("src/avtr1_renderer/api/app.py", [
+    (
+        '@app.get("/health")\nasync def health(request: Request):\n',
+        '@app.get("/avatar-geometry")\n'
+        "async def kio_avatar_geometry(request: Request) -> dict[str, dict]:\n"
+        '    """Per avatar, where the animated square (face, hair, neck) sits in the picture, as fractions.\n'
+        "\n"
+        "    Local addition: the streamer centres a per-session crop on it (kio_video_shape.py).\n"
+        '    """\n'
+        "    import kio_motion_tuning\n"
+        "\n"
+        '    registry: dict = getattr(request.app.state, "registry", None) or {}\n'
+        '    return {"avatars": {k: kio_motion_tuning.face_box(a) for k, a in sorted(registry.items())}}\n'
+        "\n"
+        "\n"
+        '@app.get("/health")\nasync def health(request: Request):\n',
         1,
     ),
 ])

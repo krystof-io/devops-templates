@@ -18,6 +18,8 @@ _STR, _INT, _FLOAT, _FLAG, _JSON = "text", "integer", "number", '"0" or "1"', "J
 
 # name -> (kind, what it is)
 REQUIRED: dict[str, tuple[str, str]] = {
+    # what this deployment is
+    "KIO_ENGINE": (_STR, '"conversation" (own speech-to-text and LLM) or "text-in" (another program supplies the words)'),
     # process wiring
     "STREAMER_HOST": (_STR, "address the page/signalling server binds to"),
     "STREAMER_PORT": (_INT, "port the page/signalling server listens on"),
@@ -64,6 +66,12 @@ REQUIRED: dict[str, tuple[str, str]] = {
     "KIO_BARGE_IN_FACTOR": (_FLOAT, "how much louder an interruption must be"),
     "KIO_BARGE_IN_START_MS": (_INT, "how long an interruption must last"),
 }
+
+ENGINES = ("conversation", "text-in")
+# Needed only when KIO_ENGINE is "conversation": the engine's own speech-to-text,
+# LLM and turn-taking. A "text-in" deployment leaves them out.
+CONVERSATION_ONLY = {n for n in REQUIRED if n.startswith(("KIO_STT_", "KIO_LLM_", "KIO_VAD_", "KIO_BARGE_IN"))} | {
+    "KIO_SYSTEM_PROMPT", "KIO_HISTORY_TURNS"}
 
 # Settings where an empty value is a deliberate choice. Everything else must be non-empty.
 ALLOW_EMPTY = {"KIO_VIDEO_CODEC", "KIO_LLM_API_KEY", "KIO_WEBRTC_PUBLIC_IP"}
@@ -112,7 +120,12 @@ def obj(name: str) -> dict:
 
 def problems() -> list[str]:
     out: list[str] = []
+    engine = os.environ.get("KIO_ENGINE")
+    if engine is not None and engine not in ENGINES:
+        out.append(f"  KIO_ENGINE: {engine!r} is not one of {', '.join(ENGINES)}")
     for name, (kind, what) in REQUIRED.items():
+        if engine == "text-in" and name in CONVERSATION_ONLY:
+            continue
         raw = os.environ.get(name)
         if raw is None:
             out.append(f"  {name}: not set  ({what})")

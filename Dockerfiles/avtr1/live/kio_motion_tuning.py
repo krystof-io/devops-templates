@@ -94,3 +94,28 @@ def apply_gains(motions, avatar) -> None:
         gain[_EYELID_COLS] *= lids
     if bool((gain != 1.0).any()):
         motions.exp[:] = src_all + gain * (motions.exp - src_all)
+
+
+_face_boxes: dict[str, dict | None] = {}
+
+
+def face_box(avatar) -> dict | None:
+    """Where the animated square (face, hair, neck) sits in the picture, as fractions of its width and height.
+
+    Read from the transform the renderer keeps for pasting the animated crop back
+    into the full picture (Avatar.M_grid maps picture coordinates to crop
+    coordinates, both on a -1..1 scale). Used by the streamer to centre a
+    per-session crop on the face; see kio_video_shape.py.
+    """
+    if avatar.id not in _face_boxes:
+        try:
+            m = avatar.M_grid.detach().float().cpu().reshape(2, 3)
+            inv = torch.linalg.inv(m[:, :2])
+            centre = -(inv @ m[:, 2])
+            cx, cy = (float(centre[0]) + 1) / 2, (float(centre[1]) + 1) / 2
+            hx, hy = float(inv[:, 0].norm()) / 2, float(inv[:, 1].norm()) / 2
+            clamp = lambda v: round(min(max(v, 0.0), 1.0), 4)  # noqa: E731
+            _face_boxes[avatar.id] = {"x0": clamp(cx - hx), "y0": clamp(cy - hy), "x1": clamp(cx + hx), "y1": clamp(cy + hy)}
+        except Exception:  # noqa: BLE001 - a crop is a nicety; never fail a request over it
+            _face_boxes[avatar.id] = None
+    return _face_boxes[avatar.id]
