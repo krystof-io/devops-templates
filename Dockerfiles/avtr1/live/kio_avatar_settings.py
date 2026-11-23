@@ -78,7 +78,8 @@ _FIELDS += [
      "How long she takes to move into a pose and back out of it."),
     *[
         (f"pose.{_m}.{_c}", f"{_m.capitalize()}: {_label}", "Poses", _NUM,
-         _mode.POSE_DEFAULTS.get(_m, {}).get(_c, 0.0), _lo, _hi, _step, f"While the agent is {_m}. {_help}")
+         _mode.POSE_DEFAULTS.get(_m, {}).get(_c, _mode.CONTROL_FALLBACKS.get(_c, 0.0)), _lo, _hi, _step,
+         f"While the agent is {_m}. {_help}")
         for _m in _mode.POSE_MODES
         for (_c, _label, _lo, _hi, _step, _help) in _mode.POSE_CONTROLS
     ],

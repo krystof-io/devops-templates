@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 
 import roma
 import torch
@@ -118,14 +119,30 @@ def _apply_gains(motions, avatar) -> None:
 # The renderer is stateless per chunk, but easing into a pose needs memory, so the
 # pose in effect is kept here between chunks. One session at a time, so one pose.
 
-_POSE_KEYS = tuple(c[0] for c in mode.POSE_CONTROLS)  # gaze_x, gaze_y, head_pitch, head_yaw, head_roll
+# The values that are eased from one pose to the next. "sweep" is how far the eyes
+# travel in the reading motion; its speed (sweep_s) is read as it is, not eased.
+_POSE_KEYS = ("gaze_x", "gaze_y", "head_pitch", "head_yaw", "head_roll", "sweep")
 _FRAME_MS = 40.0  # 25 frames a second
 _pose_now = [0.0] * len(_POSE_KEYS)
 _pose_avatar = ""
+_sweep_phase = 0.0  # 0..1 through one pass across and back
+_sweep_s = 3.0
 
 
 def _col(keypoint: int, axis: int) -> int:
     return _COORDS.index(keypoint * 3 + axis)
+
+
+def reading_wave(phase: float) -> float:
+    """-1..1 for a phase of 0..1: a slow, even pass across (four fifths of the time), then a quick return.
+
+    That is how eyes move over lines of text; a plain back-and-forth at one speed
+    looks like watching tennis.
+    """
+    phase %= 1.0
+    if phase < 0.8:
+        return -math.cos(math.pi * phase / 0.8)
+    return math.cos(math.pi * (phase - 0.8) / 0.2)
 
 
 def pose_target(avatar_id: str, current_mode: str) -> list[float]:
@@ -138,13 +155,17 @@ def pose_target(avatar_id: str, current_mode: str) -> list[float]:
 
 def apply_pose(motions, avatar) -> None:
     """Blend the current mode's pose into the generated motion, in place, frame by frame."""
-    global _pose_avatar
+    global _pose_avatar, _sweep_phase, _sweep_s
     if avatar.id != _pose_avatar:  # another avatar: start from no pose rather than the last one's
         _pose_avatar = avatar.id
         _pose_now[:] = [0.0] * len(_POSE_KEYS)
-    target = pose_target(avatar.id, mode.get_mode())
+    current_mode = mode.get_mode()
+    target = pose_target(avatar.id, current_mode)
     if not any(target) and not any(abs(v) > 1e-3 for v in _pose_now):
+        _sweep_phase = 0.0  # the next pose starts its sweep from one side, not mid-way
         return
+    if current_mode in mode.POSE_MODES:
+        _sweep_s = max(float(settings.get(avatar.id, f"pose.{current_mode}.sweep_s")), 0.5)
     blend_ms = max(float(settings.get(avatar.id, "pose.blend_ms")), _FRAME_MS)
     step = min(1.0, _FRAME_MS / blend_ms * 3.0)  # an exponential approach, about done in blend_ms
     n = motions.exp.shape[0]
@@ -152,7 +173,10 @@ def apply_pose(motions, avatar) -> None:
     for _ in range(n):
         for i, t in enumerate(target):
             _pose_now[i] += (t - _pose_now[i]) * step
-        frames.append(list(_pose_now))
+        _sweep_phase = (_sweep_phase + _FRAME_MS / 1000.0 / _sweep_s) % 1.0
+        row = list(_pose_now[:5])
+        row[0] += _pose_now[5] * reading_wave(_sweep_phase)  # the sweep rides on the gaze
+        frames.append(row)
     p = torch.tensor(frames, device=motions.exp.device, dtype=motions.exp.dtype)  # (n, 5)
     gx, gy = p[:, 0], p[:, 1]
     # Gaze: LivePortrait's eyeball-direction mapping onto keypoints 11, 13, 15 and 16.
